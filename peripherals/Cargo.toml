@@ -1,0 +1,12 @@
+[package]
+name = "peripherals"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Real STM32G4 GPIO driver (src/stm32g4/gpio.rs). Chip variant must match
+# the workspace root's stm32g4xx-hal feature (see root Cargo.toml):
+# STM32G431CB (B-G431B-ESC1 Discovery kit). Target-gated to arm so
+# host-side `cargo test` (see README.md) never tries to compile it.
+[target.'cfg(target_arch = "arm")'.dependencies]
+stm32-metapac = { version = "21", features = ["stm32g431cb"] }
