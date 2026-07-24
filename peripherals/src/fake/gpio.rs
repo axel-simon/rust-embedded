@@ -3,7 +3,7 @@
 
 use core::cell::Cell;
 
-use crate::api::gpio::{GpioMode, GpioPin, GpioPull, GpioTrait, PinAndPort};
+use crate::api::gpio::{GpioMode, GpioPin, GpioPull, GpioTrait, PinToken};
 
 const NUM_PORTS: usize = 10; // PA..=PJ
 const PINS_PER_PORT: usize = 32; // pin_number is a 5-bit value (0..=31)
@@ -40,8 +40,8 @@ impl PortState {
 }
 
 /// A fake GPIO driver that simulates the physical state of every pin of
-/// every port, without touching any real hardware. Only pins named at
-/// construction (via [`GpioFake::new`]) are considered "wired up"; calling
+/// every port, without touching any real hardware. Only pins claimed via
+/// [`GpioFake::claim_pin`] are considered "wired up"; calling
 /// [`GpioTrait::configure`] on any other pin still works, but warns, since
 /// that's almost always a test-setup mistake.
 pub struct GpioFake {
@@ -50,26 +50,36 @@ pub struct GpioFake {
 }
 
 impl GpioFake {
-    /// Creates a fake chip where only the given pins are considered
-    /// wired up. Every pin (registered or not) starts in `Analog` mode
-    /// with a low physical level, matching real GPIO reset state.
-    pub fn new(pins: &[PinAndPort]) -> Self {
-        let fake = GpioFake {
+    /// Creates a fake chip with no pins claimed yet. Every pin starts in
+    /// `Analog` mode with a low physical level, matching real GPIO reset
+    /// state.
+    pub fn new() -> Self {
+        GpioFake {
             ports: core::array::from_fn(|_| PortState::new()),
             warning_count: Cell::new(0),
-        };
-        for p in pins {
-            let port = &fake.ports[p.port() as usize];
-            let mask = 1u32 << (p.pin_number() as u32);
-            port.registered.set(port.registered.get() | mask);
         }
-        fake
     }
 
     /// Number of warnings emitted so far (misuse detected by `configure`
     /// or `set`); mainly useful for tests to assert a warning happened.
     pub fn warning_count(&self) -> u32 {
         self.warning_count.get()
+    }
+
+    /// Claims ownership of a pin-resource handle and registers it as
+    /// "wired up" — e.g. a fake `resources::Peri<'static,
+    /// resources::peripherals::PAx>` stand-in for a real
+    /// `embassy_stm32::Peri`, or a bare pin-token type like
+    /// `stm32g4::gpio::PC6`. `T: PinToken` is how the identity to
+    /// register is recovered (real `embassy_stm32` pin types can't
+    /// implement it without violating Rust's orphan rule, which is why
+    /// [`Gpio::claim_pin`](crate::stm32g4::gpio::Gpio::claim_pin) can't do
+    /// the same). [`crate::claim_pins!`] calls this once per pin for a
+    /// whole list at once.
+    pub fn claim_pin<T: PinToken>(&mut self, _pin: T) {
+        let port = &self.ports[T::PORT as usize];
+        let mask = 1u32 << (T::NUMBER as u32);
+        port.registered.set(port.registered.get() | mask);
     }
 
     fn is_registered(&self, pin: GpioPin) -> bool {
@@ -158,13 +168,7 @@ fn emit_warning(_args: core::fmt::Arguments) {}
 mod tests {
     use super::*;
     use crate::api::gpio::{GpioPort, GpioSpeed};
-
-    // `PinAndPort::new` is `pub(crate)`, so these tests (being part of
-    // this crate) can build one directly without going through a real
-    // pin-type token.
-    fn pc6() -> PinAndPort {
-        PinAndPort::new(GpioPort::PC, 6)
-    }
+    use crate::stm32g4::gpio::PC6;
 
     fn pin(port: GpioPort, pin_number: u8, mode: GpioMode, pull: GpioPull) -> GpioPin {
         GpioPin::new(port, pin_number, mode, pull, GpioSpeed::Low)
@@ -172,28 +176,30 @@ mod tests {
 
     #[test]
     fn starts_up_analog_and_low() {
-        let fake = GpioFake::new(&[]);
+        let fake = GpioFake::new();
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::None);
         assert_eq!(fake.get(p), false);
     }
 
     #[test]
     fn configure_unregistered_pin_warns() {
-        let mut fake = GpioFake::new(&[]);
+        let mut fake = GpioFake::new();
         fake.configure(pin(GpioPort::PC, 6, GpioMode::Output, GpioPull::None));
         assert_eq!(fake.warning_count(), 1);
     }
 
     #[test]
     fn configure_registered_pin_does_not_warn() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         fake.configure(pin(GpioPort::PC, 6, GpioMode::Output, GpioPull::None));
         assert_eq!(fake.warning_count(), 0);
     }
 
     #[test]
     fn pull_up_forces_physical_high() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::Up);
         fake.configure(p);
         assert_eq!(fake.get(p), true);
@@ -201,7 +207,8 @@ mod tests {
 
     #[test]
     fn pull_down_forces_physical_low() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         fake.configure(pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::Up));
         // Reconfiguring with a pull-down should now force it back low.
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::Down);
@@ -211,7 +218,8 @@ mod tests {
 
     #[test]
     fn set_and_get_round_trip() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         let p = pin(GpioPort::PC, 6, GpioMode::Output, GpioPull::None);
         fake.configure(p);
         fake.set(p, true);
@@ -222,7 +230,8 @@ mod tests {
 
     #[test]
     fn inverted_output_flips_logical_value() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         let p = pin(GpioPort::PC, 6, GpioMode::InvertedOutput, GpioPull::None);
         fake.configure(p);
         fake.set(p, true);
@@ -231,7 +240,8 @@ mod tests {
 
     #[test]
     fn set_on_analog_pin_warns_and_does_not_write() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         let p = pin(GpioPort::PC, 6, GpioMode::Analog, GpioPull::None);
         fake.configure(p);
         fake.set(p, true);
@@ -241,7 +251,8 @@ mod tests {
 
     #[test]
     fn set_on_alternate_mode_pin_warns() {
-        let mut fake = GpioFake::new(&[pc6()]);
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
         let p = pin(GpioPort::PC, 6, GpioMode::AlternateMode, GpioPull::None);
         fake.configure(p);
         fake.set(p, true);
@@ -249,9 +260,11 @@ mod tests {
     }
 
     #[test]
-    fn pin_and_port_from_real_pin_token_matches() {
-        use crate::stm32g4::gpio::{pin_and_port, PC6};
-
-        assert_eq!(pin_and_port::<PC6>(), pc6());
+    fn claim_pin_registers_the_pin_token_gave() {
+        let mut fake = GpioFake::new();
+        fake.claim_pin(PC6);
+        // PB0 was never claimed, so it should still warn.
+        fake.configure(pin(GpioPort::PB, 0, GpioMode::Output, GpioPull::None));
+        assert_eq!(fake.warning_count(), 1);
     }
 }

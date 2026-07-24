@@ -8,23 +8,26 @@ any external HAL crate; the one real-hardware dependency is
 ## Layout
 
 - `src/api/gpio.rs` — device-agnostic GPIO types: `GpioPin` (bit-packed
-  into a `u32`), `GpioTrait`, and `PinAndPort`.
-- `src/fake/peri.rs` — `Peri`, a standalone peripheral-ownership token (in the
-  spirit of `embassy_hal_internal::Peri`, but self-contained), and the
-  `PeripheralType` marker trait it requires.
+  into a `u32`), `GpioTrait`, and `PinToken` (implemented by any type that
+  knows its own physical GPIO identity).
 - `src/stm32g4/gpio.rs` — STM32G4 GPIO pin type tokens (`PA0`..`PJ15`),
-  each a zero-sized type implementing `PinToken` (to build a `PinAndPort`
-  via `pin_and_port::<PC6>()`) and `PeripheralType` (for use as a
-  `Peri<'_, PC6>`); and, gated to `cfg(target_arch = "arm")`, `Gpio`, a
-  `GpioTrait` driver backed by `stm32-metapac` register access for the
-  STM32G431CB. `set()`/`get()` use the BSRR/IDR registers directly (a
-  single volatile write/read per call — atomic, no read-modify-write race
-  with other pins or other code touching the same port); `configure()`
-  does a normal (non-atomic) read-modify-write of MODER/OTYPER/OSPEEDR/PUPDR,
-  which is fine since pin configuration isn't done concurrently with itself.
+  each a zero-sized type implementing `PinToken`; and, gated to
+  `cfg(target_arch = "arm")`, `Gpio`, a `GpioTrait` driver backed by
+  `stm32-metapac` register access for the STM32G431CB. `set()`/`get()` use
+  the BSRR/IDR registers directly (a single volatile write/read per call —
+  atomic, no read-modify-write race with other pins or other code touching
+  the same port); `configure()` does a normal (non-atomic) read-modify-write
+  of MODER/OTYPER/OSPEEDR/PUPDR, which is fine since pin configuration isn't
+  done concurrently with itself. `Gpio::new()` takes no arguments and
+  `claim_pin()` is a no-op — the real driver stays a zero-sized type and
+  does no bookkeeping of its own; ownership enforcement for `Peri`-backed
+  pins is just the Rust-level move (see `boards/resources`).
 - `src/fake/gpio.rs` — `GpioFake`, a `GpioTrait` implementation that
   simulates pin state in memory, for unit-testing code that depends on
-  `GpioTrait` without any hardware.
+  `GpioTrait` without any hardware. Unlike the real driver, `claim_pin()`
+  here does real bookkeeping (via `PinToken`): only claimed pins are
+  considered "wired up", and `configure()` warns if called on one that
+  isn't.
 
 ## Running tests on the host
 
