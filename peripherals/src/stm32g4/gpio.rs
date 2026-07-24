@@ -4,36 +4,21 @@
 //!
 //! The pin tokens are self-contained: each pin (`PA0`..`PJ15`) is a
 //! zero-sized token type naming one physical GPIO pin, with no dependency
-//! on any external HAL/PAC crate. Tokens implement [`PinToken`] (to build
-//! a [`PinAndPort`] for [`fake::gpio::GpioFake`](crate::fake::gpio::GpioFake))
-//! and [`PeripheralType`] (for use as a [`Peri`](crate::fake::peri::Peri)
-//! handle with the real [`Gpio`](self::Gpio) driver below).
+//! on any external HAL/PAC crate. Tokens implement [`PinToken`], so they
+//! can be passed to
+//! [`GpioFake::claim_pin`](crate::fake::gpio::GpioFake::claim_pin).
 //!
 //! The driver itself is gated to `cfg(target_arch = "arm")`: it depends on
 //! `stm32-metapac`, which is only pulled in as a dependency for that target
 //! (see Cargo.toml), so host-side `cargo test` (see peripherals/README.md)
 //! never compiles it and this file's own tests only exercise the tokens.
 
-use crate::api::gpio::{GpioPort, PinAndPort};
-use crate::fake::peri::PeripheralType;
+use crate::api::gpio::{GpioPort, PinToken};
 
 #[cfg(target_arch = "arm")]
 use crate::api::gpio::{GpioMode, GpioPin, GpioPull, GpioSpeed, GpioTrait};
 #[cfg(target_arch = "arm")]
 use stm32_metapac::gpio::vals;
-
-/// Implemented by every pin type token (e.g. `PC6`), exposing its port
-/// and pin number as associated constants.
-pub trait PinToken {
-    const PORT: GpioPort;
-    const NUMBER: u8;
-}
-
-/// The only way to obtain a `PinAndPort`: name a real pin type, e.g.
-/// `pin_and_port::<PC6>()`.
-pub fn pin_and_port<T: PinToken>() -> PinAndPort {
-    PinAndPort::new(T::PORT, T::NUMBER)
-}
 
 macro_rules! pin {
     ($name:ident, $port:ident, $number:expr) => {
@@ -45,8 +30,6 @@ macro_rules! pin {
             const PORT: GpioPort = GpioPort::$port;
             const NUMBER: u8 = $number;
         }
-
-        impl PeripheralType for $name {}
     };
 }
 
@@ -83,6 +66,33 @@ port!(PJ: PJ0 = 0, PJ1 = 1, PJ2 = 2, PJ3 = 3, PJ4 = 4, PJ5 = 5, PJ6 = 6, PJ7 = 7
 pub struct Gpio;
 
 #[cfg(target_arch = "arm")]
+impl Gpio {
+    /// This driver does no bookkeeping of its own — it stays a
+    /// zero-sized type; register access is stateless port/pin math, see
+    /// `gpio_block`.
+    pub fn new() -> Self {
+        Gpio
+    }
+
+    /// Claims ownership of a pin-resource handle — typically a real
+    /// `embassy_stm32::Peri<'static, embassy_stm32::peripherals::PAx>`.
+    /// Purely a Rust move: `pin` is dropped immediately and this driver
+    /// does nothing else with it (unlike
+    /// [`GpioFake::claim_pin`](crate::fake::gpio::GpioFake::claim_pin),
+    /// which uses [`PinToken`] to actually register the pin — real
+    /// `embassy_stm32` pin types can't implement that trait without
+    /// violating Rust's orphan rule, so this side can't do the same
+    /// bookkeeping). Its only effect is preventing `pin` from being
+    /// independently claimed and used elsewhere (e.g. through
+    /// `embassy_stm32`'s own pin API) — register access via
+    /// `configure`/`set`/`get` is driven entirely by the `GpioPin` config
+    /// value, unrelated to whatever claimed the underlying physical pin.
+    /// [`crate::claim_pins!`] calls this once per pin for a whole list at
+    /// once.
+    pub fn claim_pin<T>(&mut self, _pin: T) {}
+}
+
+#[cfg(target_arch = "arm")]
 impl GpioTrait for Gpio {
     fn configure(&mut self, pin: GpioPin) {
         let n = pin.pin_number() as usize;
@@ -115,6 +125,13 @@ impl GpioTrait for Gpio {
             } else {
                 r.bsrr().write(|w| w.set_br(n, true));
             }
+        }
+
+        // Route the alternate function before flipping MODER to Alternate,
+        // for the same glitch-avoidance reason as the BSRR write above.
+        if pin.mode() == GpioMode::AlternateMode {
+            r.afr(n / 8)
+                .modify(|w| w.set_afr(n % 8, pin.alternate_function()));
         }
 
         r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSH_PULL));
@@ -154,6 +171,27 @@ impl GpioTrait for Gpio {
     }
 }
 
+/// Enables the AHB2 clock for every GPIO port that exists on the STM32G431
+/// (A..G). `Gpio::configure`/`set`/`get` poke GPIOx registers directly,
+/// bypassing whatever peripheral-clock bookkeeping a higher-level HAL or
+/// `embassy_stm32::init()` might otherwise do on your behalf (they only
+/// enable a port's clock when *their own* pin API claims that port), so
+/// without this, register writes to an unclocked GPIO port are silently
+/// ineffective. Idempotent; safe to call more than once, and safe to call
+/// even for ports this board doesn't use.
+#[cfg(target_arch = "arm")]
+pub fn enable_gpio_clocks() {
+    stm32_metapac::RCC.ahb2enr().modify(|w| {
+        w.set_gpioaen(true);
+        w.set_gpioben(true);
+        w.set_gpiocen(true);
+        w.set_gpioden(true);
+        w.set_gpioeen(true);
+        w.set_gpiofen(true);
+        w.set_gpiogen(true);
+    });
+}
+
 /// Maps a [`GpioPort`] to its `stm32-metapac` register block.
 ///
 /// STM32G431 exposes GPIOA..GPIOG; the `PH`/`PI`/`PJ` tokens above exist in
@@ -183,15 +221,9 @@ mod tests {
 
     #[test]
     fn first_and_last_pin_of_each_boundary_port_map_correctly() {
-        assert_eq!(pin_and_port::<PA0>(), PinAndPort::new(GpioPort::PA, 0));
-        assert_eq!(pin_and_port::<PA15>(), PinAndPort::new(GpioPort::PA, 15));
-        assert_eq!(pin_and_port::<PJ0>(), PinAndPort::new(GpioPort::PJ, 0));
-        assert_eq!(pin_and_port::<PJ15>(), PinAndPort::new(GpioPort::PJ, 15));
-    }
-
-    #[test]
-    fn pin_token_implements_peripheral_type() {
-        fn assert_peripheral_type<T: PeripheralType>() {}
-        assert_peripheral_type::<PC6>();
+        assert_eq!((PA0::PORT, PA0::NUMBER), (GpioPort::PA, 0));
+        assert_eq!((PA15::PORT, PA15::NUMBER), (GpioPort::PA, 15));
+        assert_eq!((PJ0::PORT, PJ0::NUMBER), (GpioPort::PJ, 0));
+        assert_eq!((PJ15::PORT, PJ15::NUMBER), (GpioPort::PJ, 15));
     }
 }

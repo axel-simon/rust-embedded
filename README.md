@@ -1,19 +1,29 @@
 # rust-embedded
 
-RTIC firmware for the STM32G431 that blinks an LED on **PC6**. TIM2 is
-configured to count up to 100,000 ticks (1 tick = 1 microsecond, i.e. a
-100 ms period) and fires an update interrupt each time it wraps; that
-interrupt is bound directly to an RTIC hardware task which toggles the
-LED. The LED GPIO pin and the timer are `#[local]` resources owned
-exclusively by that task, so no other task or shared state can touch
-them.
+Firmware for the STM32G431 (B-G431B-ESC1 Discovery kit) that blinks the
+board's status LED on **PC6**. `main.rs` calls
+[`esc1_discovery::initialize()`](boards/esc1_discovery/init.rs), which
+brings up the chip via `embassy_stm32::init()`, configures every pin
+declared in [`boards/esc1_discovery/board.rs`](boards/esc1_discovery/board.rs)
+(the B-G431B-ESC1's full Table 4 pin map) through the register-level
+`Gpio` driver in the [`peripherals`](peripherals) crate, and hands back a
+`Peripherals { gpio, delay }` bundle. `main.rs` then loops, toggling the
+LED with `gpio.set(...)` and pacing itself with `delay.delay_ms(100)`
+(`embassy_time::Delay`, blocking — no async executor involved).
+
+`peripherals` and `boards/esc1_discovery` are hardware-agnostic where it
+matters: `peripherals` also ships a fake `GpioTrait` backend for host-side
+testing (see [peripherals/README.md](peripherals/README.md)), and
+`esc1_discovery::initialize()` uses that fake backend automatically when
+built for a non-`arm` target.
 
 Targets the **STM32G431CB** variant (e.g. B-G431B-ESC1) by default. For a
-different G431 package/flash size, change the `stm32g431` feature set in
-[Cargo.toml](Cargo.toml) (see `stm32g4xx-hal`'s `Cargo.toml` for the full
-list of chip features), update [memory.x](memory.x) with the matching
-flash/RAM sizes, and update the `--chip` value in
-[.cargo/config.toml](.cargo/config.toml) to match.
+different G431 package/flash size, change the `stm32g431cb` feature in
+[boards/esc1_discovery/Cargo.toml](boards/esc1_discovery/Cargo.toml) (see
+`embassy-stm32`'s `Cargo.toml` for the full list of chip features) and in
+[peripherals/Cargo.toml](peripherals/Cargo.toml), update
+[memory.x](memory.x) with the matching flash/RAM sizes, and update the
+`--chip` value in [.cargo/config.toml](.cargo/config.toml) to match.
 
 ## Build
 

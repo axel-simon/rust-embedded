@@ -1,0 +1,27 @@
+[package]
+name = "esc1_discovery"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# board.rs lives at the crate root (not src/lib.rs) so the path asked for —
+# boards/esc1_discovery/board.rs — is exactly where the module lives.
+[lib]
+path = "board.rs"
+
+[dependencies]
+peripherals = { path = "../../peripherals" }
+# Backend-selected Peripherals/Peri aliases + init() — see
+# boards/resources/resources.rs. Plain (not target-gated): resources
+# handles its own arm/non-arm branching internally.
+resources = { path = "../resources" }
+
+# `embassy_time::Delay` (the tick source board.rs's `initialize()` hands
+# back on real hardware) needs the "time-driver-tim2" feature enabled
+# somewhere in the build — resources/Cargo.toml enables it on
+# embassy-stm32, and this crate needs the matching tick-rate feature on
+# embassy-time itself. Target-gated: host-side `cargo test` (see
+# peripherals/README.md) never needs it, since `initialize()` falls back
+# to the `resources`/`peripherals::fake` backends there.
+[target.'cfg(target_arch = "arm")'.dependencies]
+embassy-time = { version = "0.5", features = ["tick-hz-1_000_000"] }

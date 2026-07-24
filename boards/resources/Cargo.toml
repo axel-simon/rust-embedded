@@ -1,0 +1,21 @@
+[package]
+name = "resources"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# resources.rs lives at the crate root (not src/lib.rs) so the path asked
+# for — boards/resources/resources.rs — is exactly where the module lives.
+[lib]
+path = "resources.rs"
+
+[dependencies]
+# Only needed for enable_gpio_clocks() in init()'s arm branch (see
+# resources.rs); the rest of this crate has no other peripherals dependency.
+peripherals = { path = "../../peripherals" }
+
+# Real hardware bring-up: embassy_stm32::init() + the Peripherals/Peri
+# types resources.rs aliases to on the arm target. Host builds use
+# fake_embassy.rs instead, so this is target-gated.
+[target.'cfg(target_arch = "arm")'.dependencies]
+embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "time-driver-tim2", "rt"] }
