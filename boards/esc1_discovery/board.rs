@@ -5,6 +5,7 @@
 //! pinout for motor control" in UM2516 (the kit's user manual).
 #![cfg_attr(not(test), no_std)]
 
+use common::uptime::Uptime;
 use peripherals::api::gpio::{GpioPin, GpioPort, GpioTrait};
 
 // Motor phase PWM (TIM1): CH1/CH2/CH3 drive the high side (AF6), CH1N/CH2N/CH3N
@@ -72,25 +73,47 @@ pub const BUTTON_PIN: GpioPin = GpioPin::inverted_input(GpioPort::PC, 10).with_p
 // Unused.
 pub const TP3_PIN: GpioPin = GpioPin::analog(GpioPort::PB, 1);
 
+/// Backend-selected [`peripherals::api::gpio::GpioTrait`] driver — see
+/// [`initialize`]. Real hardware on `target_arch = "arm"`, a fake elsewhere
+/// (so host-side `cargo test` works without hardware).
+#[cfg(target_arch = "arm")]
+pub type Gpio = peripherals::stm32g4::gpio::Gpio;
+#[cfg(not(target_arch = "arm"))]
+pub type Gpio = peripherals::fake::gpio::GpioFake;
+
+/// Backend-selected [`peripherals::api::clock::ClockProviderTrait`]
+/// implementation — see [`initialize`]. Real hardware on
+/// `target_arch = "arm"`, a fake elsewhere (so host-side `cargo test` works
+/// without hardware).
+#[cfg(target_arch = "arm")]
+pub type ClockProvider = peripherals::stm32g4::clock::ClockProvider;
+#[cfg(not(target_arch = "arm"))]
+pub type ClockProvider = peripherals::fake::clock::ClockProviderFake;
+
 /// Everything this board's firmware gets from bringing up the chip: the
-/// GPIO driver (already `configure()`d for every `_PIN` const above), a
-/// delay source on real hardware, and ownership of every pin/peripheral
-/// this board's schematic uses that doesn't have a dedicated `GpioPin`
-/// role.
+/// GPIO driver (already `configure()`d for every `_PIN` const above), and
+/// ownership of every pin/peripheral this board's schematic uses that
+/// doesn't have a dedicated `GpioPin` role.
 ///
-/// `gpio`'s type (and the presence of `delay`) is the only thing that
-/// differs between real hardware and host/test builds — see
-/// [`initialize`]. The remaining fields keep the same upper-case names
-/// they have on `resources::Peripherals` (and, on real hardware,
+/// [`Gpio`]'s underlying type is the only thing that differs between real
+/// hardware and host/test builds — see [`initialize`]. The remaining
+/// fields keep the same upper-case names they have on
+/// `resources::Peripherals` (and, on real hardware,
 /// `embassy_stm32::Peripherals`) since they're moved out of it verbatim.
 #[allow(non_snake_case)]
 pub struct BoardPeripherals {
-    #[cfg(target_arch = "arm")]
-    pub gpio: peripherals::stm32g4::gpio::Gpio,
-    #[cfg(not(target_arch = "arm"))]
-    pub gpio: peripherals::fake::gpio::GpioFake,
-    #[cfg(target_arch = "arm")]
-    pub delay: embassy_time::Delay,
+    pub gpio: Gpio,
+    /// Owns the reference point every [`peripherals::api::clock::ClockTrait`]
+    /// view this board hands out (via
+    /// [`peripherals::api::clock::ClockProviderTrait::get_clock`]) reads
+    /// from. Nothing refreshes it on a schedule of its own — call
+    /// [`peripherals::api::clock::ClockProviderTrait::advance_reference_point`]
+    /// periodically.
+    pub clock_provider: ClockProvider,
+    /// Time elapsed since boot, as of the last time it was refreshed (see
+    /// [`peripherals::api::clock::ClockTrait::now`]). Starts at
+    /// [`Uptime::epoch`] here; nothing in [`initialize`] refreshes it yet.
+    pub uptime: Uptime,
 
     /// SWDIO / JTMS — ST-LINK debug connection (J4 when the daughterboard
     /// is removed). Not managed as a `GpioPin`; firmware never drives it.
@@ -198,6 +221,11 @@ pub fn initialize() -> BoardPeripherals {
         OPAMP1,
         OPAMP2,
         OPAMP3,
+        // Only borrowed (see `ClockProvider::new`'s doc comment below), so
+        // renamed to keep the fake backend's build (which never reads
+        // them) from warning that they're unused.
+        RCC: _rcc,
+        DBGMCU: _dbgmcu,
         ..
     } = resources::init();
     // Every other field of the `Peripherals` above — every peripheral this
@@ -240,10 +268,7 @@ pub fn initialize() -> BoardPeripherals {
         TP3_PIN,
     ];
 
-    #[cfg(target_arch = "arm")]
-    let mut gpio = peripherals::stm32g4::gpio::Gpio::new();
-    #[cfg(not(target_arch = "arm"))]
-    let mut gpio = peripherals::fake::gpio::GpioFake::new();
+    let mut gpio = Gpio::new();
 
     // Claims the 34 pins: on real hardware this is just a Rust move (the
     // `Peri` bound above is dropped, so it can't also be claimed through
@@ -259,10 +284,15 @@ pub fn initialize() -> BoardPeripherals {
         gpio.configure(pin);
     }
 
+    #[cfg(target_arch = "arm")]
+    let clock_provider = ClockProvider::new(&_rcc, &_dbgmcu);
+    #[cfg(not(target_arch = "arm"))]
+    let clock_provider = ClockProvider::new();
+
     BoardPeripherals {
         gpio,
-        #[cfg(target_arch = "arm")]
-        delay: embassy_time::Delay,
+        clock_provider,
+        uptime: Uptime::epoch(),
         PA13,
         PA14,
         PB10,

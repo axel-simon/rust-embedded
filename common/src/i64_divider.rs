@@ -22,7 +22,7 @@ impl U64Divider {
     ///
     /// Panics if `divisor` is zero or one: `floor(2^96 / 1) == 2^96` doesn't
     /// fit in the 96-bit reciprocal representation.
-    pub fn new(divisor: u32) -> Self {
+    pub const fn new(divisor: u32) -> Self {
         assert!(divisor > 1, "divisor must be greater than 1");
 
         // `mul_high96x64` computes `floor(n * reciprocal / 2^96)`. With the
@@ -42,7 +42,7 @@ impl U64Divider {
     }
 
     /// Returns `n / divisor`.
-    pub fn divide(&self, n: u64) -> u64 {
+    pub const fn divide(&self, n: u64) -> u64 {
         mul_high96x64(n, self.r0, self.r1, self.r2)
     }
 }
@@ -57,7 +57,7 @@ impl From<u32> for U64Divider {
 /// 32x32 -> 64 bit multiplications (splitting `n` into halves the way a
 /// 32-bit multiplier has to). The exact result fits in 96 bits, i.e. safely
 /// within a `u128`.
-fn mul64x32(n: u64, r: u32) -> u128 {
+const fn mul64x32(n: u64, r: u32) -> u128 {
     let n_lo = n as u32 as u64;
     let n_hi = n >> 32;
     let r = r as u64;
@@ -76,7 +76,7 @@ fn mul64x32(n: u64, r: u32) -> u128 {
 /// need up to 160 bits. Instead each term is folded in one 32-bit column at
 /// a time, discarding the fully-resolved low bits before adding the next
 /// term — the same thing a long multiplication by hand does.
-fn mul_high96x64(n: u64, r0: u32, r1: u32, r2: u32) -> u64 {
+const fn mul_high96x64(n: u64, r0: u32, r1: u32, r2: u32) -> u64 {
     let acc = mul64x32(n, r0);
     let acc = (acc >> 32) + mul64x32(n, r1);
     let acc = (acc >> 32) + mul64x32(n, r2);
@@ -96,18 +96,17 @@ pub struct I64Divider {
 }
 
 impl I64Divider {
-    /// Builds an `I64Divider` either from a raw `u32` divisor (panicking if
-    /// it's zero or one, see [`U64Divider::new`]) or by reusing an
-    /// already-built [`U64Divider`] (which has already been validated, so
-    /// this can't panic).
-    pub fn new(source: impl Into<U64Divider>) -> Self {
+    /// Builds an `I64Divider` from a raw `u32` divisor (panicking if it's
+    /// zero or one, see [`U64Divider::new`]). `const`, so it's usable to
+    /// build precomputed, no-runtime-cost global dividers.
+    pub const fn new(divisor: u32) -> Self {
         Self {
-            inner: source.into(),
+            inner: U64Divider::new(divisor),
         }
     }
 
     /// Returns `n / divisor`, truncated toward zero (matching Rust's `/`).
-    pub fn divide(&self, n: i64) -> i64 {
+    pub const fn divide(&self, n: i64) -> i64 {
         // `unsigned_abs` (rather than `abs() as u64`) also handles
         // `i64::MIN`, whose magnitude (2^63) doesn't fit in an `i64`.
         let magnitude = self.inner.divide(n.unsigned_abs()) as i64;
@@ -116,6 +115,14 @@ impl I64Divider {
         } else {
             magnitude
         }
+    }
+}
+
+impl From<U64Divider> for I64Divider {
+    /// Reuses an already-built [`U64Divider`] (which has already been
+    /// validated, so this can't panic) instead of precomputing a fresh one.
+    fn from(inner: U64Divider) -> Self {
+        Self { inner }
     }
 }
 
@@ -242,9 +249,9 @@ mod tests {
     }
 
     #[test]
-    fn i64_new_from_existing_u64_divider() {
+    fn i64_from_existing_u64_divider() {
         let u64_divider = U64Divider::new(7);
-        let i64_divider = I64Divider::new(u64_divider);
+        let i64_divider = I64Divider::from(u64_divider);
         assert_eq!(i64_divider.divide(-100), -100 / 7);
     }
 }

@@ -11,17 +11,9 @@ path = "board.rs"
 
 [dependencies]
 peripherals = { path = "../../peripherals" }
+# Uptime — see BoardPeripherals::uptime below.
+common = { path = "../../common" }
 # Backend-selected Peripherals/Peri aliases + init() — see
 # boards/resources/resources.rs. Plain (not target-gated): resources
 # handles its own arm/non-arm branching internally.
 resources = { path = "../resources" }
-
-# `embassy_time::Delay` (the tick source board.rs's `initialize()` hands
-# back on real hardware) needs the "time-driver-tim2" feature enabled
-# somewhere in the build — resources/Cargo.toml enables it on
-# embassy-stm32, and this crate needs the matching tick-rate feature on
-# embassy-time itself. Target-gated: host-side `cargo test` (see
-# peripherals/README.md) never needs it, since `initialize()` falls back
-# to the `resources`/`peripherals::fake` backends there.
-[target.'cfg(target_arch = "arm")'.dependencies]
-embassy-time = { version = "0.5", features = ["tick-hz-1_000_000"] }
