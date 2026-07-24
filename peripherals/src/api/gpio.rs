@@ -53,7 +53,7 @@ pub enum GpioMode {
     Analog = 5,
 }
 
-const PIN_NUMBER_BITS: u32 = 5;
+const PIN_NUMBER_BITS: u32 = 8;
 const PORT_BITS: u32 = 4;
 const MODE_BITS: u32 = 3;
 const PULL_BITS: u32 = 2;
@@ -76,19 +76,23 @@ const AF_MASK: u32 = (1 << AF_BITS) - 1;
 
 /// A fully-specified GPIO pin configuration, bit-packed so that the struct
 /// fits into a single MCU register.
+///
+/// When `GpioPin` contains not only a pin's identity, but also the
+/// configuration of a GPIO. In particular, when a GPIO is used as a plain
+/// input/output, it tracks if the physical level is inverted relative to the
+/// logical interpretation. An wire called nRST should be called RST and
+/// created through an inverted_output(). Calling `gpio.set(RST, true)` will
+/// then output a 0V voltage.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GpioPin(u32);
 
 const _: () = assert!(core::mem::size_of::<GpioPin>() == 4);
 
 impl GpioPin {
-    /// General-purpose constructor. Prefer [`GpioPin::output`],
-    /// [`GpioPin::input`], [`GpioPin::alternate`], or [`GpioPin::analog`]
-    /// where they fit; this remains for cases they don't cover (e.g.
-    /// `InvertedOutput`/`InvertedInput`).
-    ///
-    /// # Panics
-    /// Panics if `pin_number` doesn't fit in 5 bits (i.e. is greater than 31).
+    /// General-purpose constructor. Prefer
+    /// [`GpioPin::output`],[`GpioPin::inverted_output`],
+    /// [`GpioPin::input`], [`GpioPin::inverted_input`],
+    /// [`GpioPin::alternate`], or [`GpioPin::analog`] where they fit.
     pub const fn new(
         port: GpioPort,
         pin_number: u8,
@@ -113,6 +117,11 @@ impl GpioPin {
             GpioSpeed::Low,
         )
     }
+    // A push-pull digital output pin whose physical level is inverted relative to
+    // the logical value seen through [`GpioTrait::set`] / [`GpioTrait::get`].
+    // Chain [`with_pull_up`](Self::with_pull_up) or
+    // [`with_pull_down`](Self::with_pull_down) to enable a pull-up or pull-down
+    // resistor on the *physical* pin.
     pub const fn inverted_output(port: GpioPort, pin_number: u8) -> Self {
         Self::new(
             port,
@@ -148,6 +157,11 @@ impl GpioPin {
             GpioSpeed::Low,
         )
     }
+    // A digital input pin whose physical level is inverted relative to the logical
+    // value seen through [`GpioTrait::set`] / [`GpioTrait::get`]. Chain
+    // [`with_pull_up`](Self::with_pull_up) or
+    // [`with_pull_down`](Self::with_pull_down) to enable a pull-up or pull-down
+    // resistor on the *physical* pin.
     pub const fn inverted_input(port: GpioPort, pin_number: u8) -> Self {
         Self::new(
             port,
@@ -220,8 +234,6 @@ impl GpioPin {
         GpioPin((self.0 & !(SPEED_MASK << SPEED_SHIFT)) | ((speed as u32) << SPEED_SHIFT))
     }
 
-    /// # Panics
-    /// Panics if `pin_number` doesn't fit in 5 bits (i.e. is greater than 31).
     const fn packed(
         port: GpioPort,
         pin_number: u8,
@@ -230,10 +242,6 @@ impl GpioPin {
         speed: GpioSpeed,
         af: u8,
     ) -> Self {
-        assert!(
-            (pin_number as u32) <= PIN_NUMBER_MASK,
-            "pin_number must fit in 5 bits"
-        );
         let bits = ((af as u32) << AF_SHIFT)
             | ((speed as u32) << SPEED_SHIFT)
             | ((pull as u32) << PULL_SHIFT)

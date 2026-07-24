@@ -15,7 +15,8 @@ resolver = "2"
 # .cargo/config.toml too if you target a different G431 package/flash size.
 esc1_discovery = { path = "boards/esc1_discovery" }
 peripherals = { path = "peripherals" }
-embedded-hal = "1"
+# `Duration`, for the blink loop's `wait_for` delay in src/main.rs.
+common = { path = "common" }
 
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
