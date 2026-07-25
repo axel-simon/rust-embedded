@@ -1,0 +1,5 @@
+# Rustfmt configuration
+# Format comments to not extend beyond column 79
+unstable_features = true
+comment_width = 79
+wrap_comments = true
