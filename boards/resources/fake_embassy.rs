@@ -16,7 +16,8 @@
 
 use core::marker::PhantomData;
 
-use ::peripherals::api::gpio::{GpioPort, PinToken};
+use ::peripherals::api::gpio::GpioPort;
+use ::peripherals::fake::gpio::PinToken;
 
 /// A minimal, self-contained stand-in for `embassy_stm32::Peri<'d, T>`:
 /// just enough shape (a value plus a borrowed lifetime) for board code to
@@ -40,7 +41,7 @@ impl<'d, T> core::ops::Deref for Peri<'d, T> {
     }
 }
 
-/// Lets `peripherals::fake::gpio::GpioFake::claim_pin` recover a claimed
+/// Lets `peripherals::fake::gpio::Gpio::claim_pin` recover a claimed
 /// pin's identity through the `Peri` wrapper, given its inner marker type
 /// (e.g. `peripherals::PA8` below) implements `PinToken`.
 impl<'d, T: PinToken> PinToken for Peri<'d, T> {
@@ -109,8 +110,8 @@ fake_peripherals!(
 /// [`fake_peripherals!`] generated above, each paired with its physical
 /// `(port, pin_number)`. Only the 42 GPIO pins have a meaningful
 /// port/pin identity — the other 88 peripheral singletons above don't get
-/// an impl, since `GpioFake::claim_pin` (the only consumer of this trait)
-/// is never called with them.
+/// an impl, since `Gpio::claim_pin` (the only consumer of this trait) is
+/// never called with them.
 macro_rules! fake_gpio_pins {
     ($($name:ident => ($port:ident, $number:expr)),+ $(,)?) => {
         $(

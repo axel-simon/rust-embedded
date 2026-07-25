@@ -464,6 +464,7 @@ name = "esc1_discovery"
 version = "0.1.0"
 dependencies = [
  "common",
+ "cortex-m",
  "peripherals",
  "resources",
 ]
