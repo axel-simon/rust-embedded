@@ -346,16 +346,6 @@ impl GpioSpeed {
     }
 }
 
-/// Implemented by any type that knows its own physical GPIO identity —
-/// e.g. a pin-token type like `stm32g4::gpio::PC6`, or (via a blanket impl
-/// over its inner type) a `Peri`-style ownership wrapper around one.
-/// [`fake::gpio::GpioFake::claim_pin`](crate::fake::gpio::GpioFake::claim_pin)
-/// uses this to register a claimed pin.
-pub trait PinToken {
-    const PORT: GpioPort;
-    const NUMBER: u8;
-}
-
 /// Abstract interface implemented by every GPIO driver, real or fake.
 pub trait GpioTrait {
     /// Applies `pin`'s mode/pull/speed configuration. On return, a configured

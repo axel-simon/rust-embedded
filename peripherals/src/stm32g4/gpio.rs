@@ -1,76 +1,27 @@
-//! STM32G4 GPIO pin type tokens, and (on the real target) a register-level
-//! [`GpioTrait`](crate::api::gpio::GpioTrait) driver backed by
-//! `stm32-metapac`.
+//! A register-level [`GpioTrait`](crate::api::gpio::GpioTrait) driver for
+//! a real STM32G4 chip, backed by `stm32-metapac`.
 //!
-//! The pin tokens are self-contained: each pin (`PA0`..`PJ15`) is a
-//! zero-sized token type naming one physical GPIO pin, with no dependency
-//! on any external HAL/PAC crate. Tokens implement [`PinToken`], so they
-//! can be passed to
-//! [`GpioFake::claim_pin`](crate::fake::gpio::GpioFake::claim_pin).
-//!
-//! The driver itself is gated to `cfg(target_arch = "arm")`: it depends on
-//! `stm32-metapac`, which is only pulled in as a dependency for that target
-//! (see Cargo.toml), so host-side `cargo test` (see peripherals/README.md)
-//! never compiles it and this file's own tests only exercise the tokens.
+//! This whole module is gated to `cfg(target_arch = "arm")` at its `mod`
+//! declaration in `peripherals/src/lib.rs`: it depends on `stm32-metapac`,
+//! which is only pulled in as a dependency for that target (see
+//! Cargo.toml), so host-side `cargo test` (see peripherals/README.md)
+//! never compiles it.
 
-use crate::api::gpio::{GpioPort, PinToken};
-
-#[cfg(target_arch = "arm")]
-use crate::api::gpio::{GpioMode, GpioPin, GpioPull, GpioSpeed, GpioTrait};
-#[cfg(target_arch = "arm")]
+use crate::api::gpio::{GpioMode, GpioPin, GpioPort, GpioPull, GpioSpeed, GpioTrait};
 use stm32_metapac::gpio::vals;
-
-macro_rules! pin {
-    ($name:ident, $port:ident, $number:expr) => {
-        #[doc = concat!("GPIO pin `", stringify!($name), "`.")]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub struct $name;
-
-        impl PinToken for $name {
-            const PORT: GpioPort = GpioPort::$port;
-            const NUMBER: u8 = $number;
-        }
-    };
-}
-
-macro_rules! port {
-    ($port:ident: $($name:ident = $n:expr),+ $(,)?) => {
-        $(pin!($name, $port, $n);)+
-    };
-}
-
-port!(PA: PA0 = 0, PA1 = 1, PA2 = 2, PA3 = 3, PA4 = 4, PA5 = 5, PA6 = 6, PA7 = 7,
-         PA8 = 8, PA9 = 9, PA10 = 10, PA11 = 11, PA12 = 12, PA13 = 13, PA14 = 14, PA15 = 15);
-port!(PB: PB0 = 0, PB1 = 1, PB2 = 2, PB3 = 3, PB4 = 4, PB5 = 5, PB6 = 6, PB7 = 7,
-         PB8 = 8, PB9 = 9, PB10 = 10, PB11 = 11, PB12 = 12, PB13 = 13, PB14 = 14, PB15 = 15);
-port!(PC: PC0 = 0, PC1 = 1, PC2 = 2, PC3 = 3, PC4 = 4, PC5 = 5, PC6 = 6, PC7 = 7,
-         PC8 = 8, PC9 = 9, PC10 = 10, PC11 = 11, PC12 = 12, PC13 = 13, PC14 = 14, PC15 = 15);
-port!(PD: PD0 = 0, PD1 = 1, PD2 = 2, PD3 = 3, PD4 = 4, PD5 = 5, PD6 = 6, PD7 = 7,
-         PD8 = 8, PD9 = 9, PD10 = 10, PD11 = 11, PD12 = 12, PD13 = 13, PD14 = 14, PD15 = 15);
-port!(PE: PE0 = 0, PE1 = 1, PE2 = 2, PE3 = 3, PE4 = 4, PE5 = 5, PE6 = 6, PE7 = 7,
-         PE8 = 8, PE9 = 9, PE10 = 10, PE11 = 11, PE12 = 12, PE13 = 13, PE14 = 14, PE15 = 15);
-port!(PF: PF0 = 0, PF1 = 1, PF2 = 2, PF3 = 3, PF4 = 4, PF5 = 5, PF6 = 6, PF7 = 7,
-         PF8 = 8, PF9 = 9, PF10 = 10, PF11 = 11, PF12 = 12, PF13 = 13, PF14 = 14, PF15 = 15);
-port!(PG: PG0 = 0, PG1 = 1, PG2 = 2, PG3 = 3, PG4 = 4, PG5 = 5, PG6 = 6, PG7 = 7,
-         PG8 = 8, PG9 = 9, PG10 = 10, PG11 = 11, PG12 = 12, PG13 = 13, PG14 = 14, PG15 = 15);
-port!(PH: PH0 = 0, PH1 = 1, PH2 = 2, PH3 = 3, PH4 = 4, PH5 = 5, PH6 = 6, PH7 = 7,
-         PH8 = 8, PH9 = 9, PH10 = 10, PH11 = 11, PH12 = 12, PH13 = 13, PH14 = 14, PH15 = 15);
-port!(PI: PI0 = 0, PI1 = 1, PI2 = 2, PI3 = 3, PI4 = 4, PI5 = 5, PI6 = 6, PI7 = 7,
-         PI8 = 8, PI9 = 9, PI10 = 10, PI11 = 11, PI12 = 12, PI13 = 13, PI14 = 14, PI15 = 15);
-port!(PJ: PJ0 = 0, PJ1 = 1, PJ2 = 2, PJ3 = 3, PJ4 = 4, PJ5 = 5, PJ6 = 6, PJ7 = 7,
-         PJ8 = 8, PJ9 = 9, PJ10 = 10, PJ11 = 11, PJ12 = 12, PJ13 = 13, PJ14 = 14, PJ15 = 15);
 
 /// Register-level [`GpioTrait`] driver for a real STM32G4 chip, backed by
 /// `stm32-metapac`.
-#[cfg(target_arch = "arm")]
 pub struct Gpio;
 
-#[cfg(target_arch = "arm")]
 impl Gpio {
     /// This driver does no bookkeeping of its own — it stays a
     /// zero-sized type; register access is stateless port/pin math, see
-    /// `gpio_block`.
+    /// `gpio_block`. Enables every GPIO port's clock (see
+    /// [`enable_gpio_clocks`]) so `configure`/`set`/`get`'s register
+    /// writes aren't silently ineffective.
     pub fn new() -> Self {
+        enable_gpio_clocks();
         Gpio
     }
 
@@ -78,11 +29,11 @@ impl Gpio {
     /// `embassy_stm32::Peri<'static, embassy_stm32::peripherals::PAx>`.
     /// Purely a Rust move: `pin` is dropped immediately and this driver
     /// does nothing else with it (unlike
-    /// [`GpioFake::claim_pin`](crate::fake::gpio::GpioFake::claim_pin),
-    /// which uses [`PinToken`] to actually register the pin — real
-    /// `embassy_stm32` pin types can't implement that trait without
-    /// violating Rust's orphan rule, so this side can't do the same
-    /// bookkeeping). Its only effect is preventing `pin` from being
+    /// [`Gpio::claim_pin`](crate::fake::gpio::Gpio::claim_pin), which uses
+    /// [`PinToken`](crate::fake::gpio::PinToken) to actually register the
+    /// pin — real `embassy_stm32` pin types can't implement that trait
+    /// without violating Rust's orphan rule, so this side can't do the
+    /// same bookkeeping). Its only effect is preventing `pin` from being
     /// independently claimed and used elsewhere (e.g. through
     /// `embassy_stm32`'s own pin API) — register access via
     /// `configure`/`set`/`get` is driven entirely by the `GpioPin` config
@@ -92,7 +43,6 @@ impl Gpio {
     pub fn claim_pin<T>(&mut self, _pin: T) {}
 }
 
-#[cfg(target_arch = "arm")]
 impl GpioTrait for Gpio {
     fn configure(&mut self, pin: GpioPin) {
         let n = pin.pin_number() as usize;
@@ -178,9 +128,9 @@ impl GpioTrait for Gpio {
 /// enable a port's clock when *their own* pin API claims that port), so
 /// without this, register writes to an unclocked GPIO port are silently
 /// ineffective. Idempotent; safe to call more than once, and safe to call
-/// even for ports this board doesn't use.
-#[cfg(target_arch = "arm")]
-pub fn enable_gpio_clocks() {
+/// even for ports this board doesn't use. Called from [`Gpio::new`], not
+/// meant to be called independently of constructing a [`Gpio`].
+fn enable_gpio_clocks() {
     stm32_metapac::RCC.ahb2enr().modify(|w| {
         w.set_gpioaen(true);
         w.set_gpioben(true);
@@ -194,12 +144,11 @@ pub fn enable_gpio_clocks() {
 
 /// Maps a [`GpioPort`] to its `stm32-metapac` register block.
 ///
-/// STM32G431 exposes GPIOA..GPIOG; the `PH`/`PI`/`PJ` tokens above exist in
-/// this crate for forward compatibility with larger G4 parts that do have
-/// those ports, but no such pin can be named on this chip (there's no
-/// `PinToken` impl for them here), so `pin.port()` can never actually be
+/// STM32G431 exposes GPIOA..GPIOG; `GpioPort::PH`/`PI`/`PJ` exist for
+/// forward compatibility with larger G4 parts that do have those ports,
+/// but no board using this crate ever constructs a `GpioPin` on one (this
+/// chip has no such physical pins), so `pin.port()` can never actually be
 /// `PH`/`PI`/`PJ` at runtime.
-#[cfg(target_arch = "arm")]
 fn gpio_block(port: GpioPort) -> stm32_metapac::gpio::Gpio {
     match port {
         GpioPort::PA => stm32_metapac::GPIOA,
@@ -212,18 +161,5 @@ fn gpio_block(port: GpioPort) -> stm32_metapac::gpio::Gpio {
         GpioPort::PH | GpioPort::PI | GpioPort::PJ => {
             unreachable!("STM32G431 has no GPIO{:?} port", port)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn first_and_last_pin_of_each_boundary_port_map_correctly() {
-        assert_eq!((PA0::PORT, PA0::NUMBER), (GpioPort::PA, 0));
-        assert_eq!((PA15::PORT, PA15::NUMBER), (GpioPort::PA, 15));
-        assert_eq!((PJ0::PORT, PJ0::NUMBER), (GpioPort::PJ, 0));
-        assert_eq!((PJ15::PORT, PJ15::NUMBER), (GpioPort::PJ, 15));
     }
 }

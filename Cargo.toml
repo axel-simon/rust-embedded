@@ -18,6 +18,11 @@ peripherals = { path = "peripherals" }
 # `Duration`, for the blink loop's `wait_for` delay in src/main.rs.
 common = { path = "common" }
 
+# Firmware-only: `src/main.rs`'s `main()`/`#[entry]` and its defmt logging
+# are `cfg(not(test))`-gated so `cargo test --target <host-triple>` (see
+# peripherals/README.md) can build and run `Firmware`'s unit tests, which
+# don't need any of these.
+[target.'cfg(target_arch = "arm")'.dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 

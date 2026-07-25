@@ -17,3 +17,8 @@ common = { path = "../../common" }
 # boards/resources/resources.rs. Plain (not target-gated): resources
 # handles its own arm/non-arm branching internally.
 resources = { path = "../resources" }
+
+# `cortex_m::Peripherals::take()`, passed into `ClockProvider::new()` — see
+# `initialize()` below.
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = "0.7.7"

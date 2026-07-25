@@ -22,19 +22,31 @@ any external HAL crate; the one real-hardware dependency is
   `claim_pin()` is a no-op — the real driver stays a zero-sized type and
   does no bookkeeping of its own; ownership enforcement for `Peri`-backed
   pins is just the Rust-level move (see `boards/resources`).
-- `src/fake/gpio.rs` — `GpioFake`, a `GpioTrait` implementation that
-  simulates pin state in memory, for unit-testing code that depends on
-  `GpioTrait` without any hardware. Unlike the real driver, `claim_pin()`
-  here does real bookkeeping (via `PinToken`): only claimed pins are
-  considered "wired up", and `configure()` warns if called on one that
-  isn't.
+- `src/fake/gpio.rs` — `Gpio::new()` returns a pair of handles onto one
+  shared, simulated chip: `Gpio`, a `GpioTrait` implementation for
+  firmware (its `set()` mirrors the real driver, only writing
+  `Output`/`InvertedOutput` pins — every other mode warns and no-ops), and
+  `FakeGpio`, a test's handle for observing pin state or forcing it
+  directly regardless of mode (simulating external hardware, e.g. a
+  button press on an input pin). `FakeGpio` is cheap to `Clone` (all
+  clones share the same underlying state via `Rc`). Unlike the real
+  driver, `claim_pin()` here does real bookkeeping (via `PinToken`): only
+  claimed pins are considered "wired up", and `configure()` warns if
+  called on one that isn't.
+- `src/fake/clock.rs` — likewise, `ClockProvider::new()` returns
+  `(ClockProvider, FakeClockProvider)`: `ClockProvider` for firmware (same
+  API as the real driver), and `FakeClockProvider` for a test to read the
+  current simulated time (`now()`, without perturbing anything) or jump
+  it forward directly (`advance_by()`).
 
 ## Running tests on the host
 
-This crate is `no_std` outside of `cfg(test)` so it can be built for the
-firmware's embedded target. The workspace's `.cargo/config.toml` pins the
-default `cargo` target to `thumbv7em-none-eabi`, which has no `std` —
-host-side tests need an explicit `--target` override for your machine:
+This crate is `no_std` only for the real (`target_arch = "arm"`) target —
+`fake` needs `std::rc::Rc` unconditionally on every other target, `cfg(test)`
+or not (see `src/lib.rs`'s doc comment for why it isn't `cfg(test)`-gated).
+The workspace's `.cargo/config.toml` pins the default `cargo` target to
+`thumbv7em-none-eabi`, which has no `std` — host-side tests need an
+explicit `--target` override for your machine:
 
 ```sh
 cargo test -p peripherals --target <your-host-triple>

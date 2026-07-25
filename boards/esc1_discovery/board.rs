@@ -8,17 +8,14 @@
 use common::uptime::Uptime;
 use peripherals::api::gpio::{GpioPin, GpioPort, GpioTrait};
 
-// Motor phase PWM (TIM1): CH1/CH2/CH3 drive the high side (AF6), CH1N/CH2N/CH3N
-// the complementary low side (AF4) — one pair per phase U/V/W.
+// Motor phase PWM (TIM1): CH1/CH2/CH3 drive the high side (AF6),
+// CH1N/CH2N/CH3N the complementary low side (AF4) — one pair per phase U/V/W.
 pub const TIM1_CH1_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 8, 6).with_very_high_speed();
-pub const TIM1_CH1N_PIN: GpioPin =
-    GpioPin::alternate(GpioPort::PC, 13, 4).with_very_high_speed();
+pub const TIM1_CH1N_PIN: GpioPin = GpioPin::alternate(GpioPort::PC, 13, 4).with_very_high_speed();
 pub const TIM1_CH2_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 9, 6).with_very_high_speed();
-pub const TIM1_CH2N_PIN: GpioPin =
-    GpioPin::alternate(GpioPort::PA, 12, 6).with_very_high_speed();
+pub const TIM1_CH2N_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 12, 6).with_very_high_speed();
 pub const TIM1_CH3_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 10, 6).with_very_high_speed();
-pub const TIM1_CH3N_PIN: GpioPin =
-    GpioPin::alternate(GpioPort::PB, 15, 4).with_very_high_speed();
+pub const TIM1_CH3N_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 15, 4).with_very_high_speed();
 
 // Per-phase current shunt feedback through OPAMP1/2/3 (analog in/out).
 pub const CURRENT_FEEDBACK1_OPAMP_P_PIN: GpioPin = GpioPin::analog(GpioPort::PA, 1);
@@ -73,13 +70,33 @@ pub const BUTTON_PIN: GpioPin = GpioPin::inverted_input(GpioPort::PC, 10).with_p
 // Unused.
 pub const TP3_PIN: GpioPin = GpioPin::analog(GpioPort::PB, 1);
 
+/// This board's HSE crystal — see the [`Self::PF0`]/[`Self::PF1`] doc
+/// comments below ("HSE crystal input/output, 8 MHz"). Fed to
+/// [`resources::init`] (via [`resources::ClockConfiguration`]) to compute
+/// the PLL configuration that reaches [`MCU_FREQUENCY`].
+pub const OSCILLATOR_FREQUENCY: u32 = 8_000_000;
+
+/// The CPU (HCLK/SYSCLK) frequency [`initialize`] configures the PLL to
+/// reach from [`OSCILLATOR_FREQUENCY`], and what
+/// [`peripherals::stm32g4::clock::ClockProvider::new`]'s DWT-cycle-counter
+/// conversions assume the chip is actually running at. Also what the fake
+/// clock simulates (see `peripherals::fake::clock`'s `TICKS_PER_SECOND`),
+/// so host/test builds behave consistently with real hardware.
+pub const MCU_FREQUENCY: u32 = 170_000_000;
+
+/// This board's HSE timepiece is an actual crystal (across `PF0`/`PF1`,
+/// both pins in use) rather than an external active oscillator module
+/// (which would only drive `PF0`, leaving `PF1` unused) — see
+/// [`resources::ClockConfiguration::timepiece_is_crystal`].
+pub const OSCILLATOR_IS_CRYSTAL: bool = true;
+
 /// Backend-selected [`peripherals::api::gpio::GpioTrait`] driver — see
 /// [`initialize`]. Real hardware on `target_arch = "arm"`, a fake elsewhere
 /// (so host-side `cargo test` works without hardware).
 #[cfg(target_arch = "arm")]
 pub type Gpio = peripherals::stm32g4::gpio::Gpio;
 #[cfg(not(target_arch = "arm"))]
-pub type Gpio = peripherals::fake::gpio::GpioFake;
+pub type Gpio = peripherals::fake::gpio::Gpio;
 
 /// Backend-selected [`peripherals::api::clock::ClockProviderTrait`]
 /// implementation — see [`initialize`]. Real hardware on
@@ -88,17 +105,40 @@ pub type Gpio = peripherals::fake::gpio::GpioFake;
 #[cfg(target_arch = "arm")]
 pub type ClockProvider = peripherals::stm32g4::clock::ClockProvider;
 #[cfg(not(target_arch = "arm"))]
-pub type ClockProvider = peripherals::fake::clock::ClockProviderFake;
+pub type ClockProvider = peripherals::fake::clock::ClockProvider;
+
+/// A test's handle onto the same simulated [`Gpio`] firmware gets — see
+/// [`peripherals::fake::gpio::FakeGpio`]. Only exists on host/test builds;
+/// there's nothing to fake on real hardware.
+#[cfg(not(target_arch = "arm"))]
+pub type FakeGpio = peripherals::fake::gpio::FakeGpio;
+
+/// See [`FakeGpio`] — the same test-facing counterpart, for
+/// [`ClockProvider`].
+#[cfg(not(target_arch = "arm"))]
+pub type FakeClockProvider = peripherals::fake::clock::FakeClockProvider;
+
+/// A test's own handles onto the fake peripherals backing a
+/// [`BoardPeripherals`] returned by [`initialize`] on host/test builds —
+/// the counterpart of [`BoardPeripherals::gpio`]/
+/// [`BoardPeripherals::clock_provider`], which firmware gets instead.
+/// Doesn't exist on real hardware, where there's nothing to fake.
+#[cfg(not(target_arch = "arm"))]
+#[derive(Clone)]
+pub struct BoardFakePeripherals {
+    pub gpio: FakeGpio,
+    pub clock_provider: FakeClockProvider,
+}
 
 /// Everything this board's firmware gets from bringing up the chip: the
 /// GPIO driver (already `configure()`d for every `_PIN` const above), and
 /// ownership of every pin/peripheral this board's schematic uses that
 /// doesn't have a dedicated `GpioPin` role.
 ///
-/// [`Gpio`]'s underlying type is the only thing that differs between real
-/// hardware and host/test builds — see [`initialize`]. The remaining
-/// fields keep the same upper-case names they have on
-/// `resources::Peripherals` (and, on real hardware,
+/// [`Gpio`]'s underlying type, and the presence of [`Self::fakes`], are the
+/// only things that differ between real hardware and host/test builds —
+/// see [`initialize`]. The remaining fields keep the same upper-case names
+/// they have on `resources::Peripherals` (and, on real hardware,
 /// `embassy_stm32::Peripherals`) since they're moved out of it verbatim.
 #[allow(non_snake_case)]
 pub struct BoardPeripherals {
@@ -114,6 +154,21 @@ pub struct BoardPeripherals {
     /// [`peripherals::api::clock::ClockTrait::now`]). Starts at
     /// [`Uptime::epoch`] here; nothing in [`initialize`] refreshes it yet.
     pub uptime: Uptime,
+
+    /// A test's own handles onto the same fake [`Self::gpio`]/
+    /// [`Self::clock_provider`] — absent on real hardware. See
+    /// [`BoardFakePeripherals`].
+    #[cfg(not(target_arch = "arm"))]
+    pub fakes: BoardFakePeripherals,
+
+    /// The Cortex-M core peripherals (NVIC, SCB, MPU, ...) not already
+    /// claimed by [`Self::clock_provider`] (which only borrows `DCB`/`DWT`
+    /// from this, via
+    /// [`peripherals::stm32g4::clock::ClockProvider::new`]) — there's
+    /// nothing to fake for a simulated core, so this only exists on real
+    /// hardware.
+    #[cfg(target_arch = "arm")]
+    pub cortex_m_peripherals: cortex_m::Peripherals,
 
     /// SWDIO / JTMS — ST-LINK debug connection (J4 when the daughterboard
     /// is removed). Not managed as a `GpioPin`; firmware never drives it.
@@ -221,13 +276,12 @@ pub fn initialize() -> BoardPeripherals {
         OPAMP1,
         OPAMP2,
         OPAMP3,
-        // Only borrowed (see `ClockProvider::new`'s doc comment below), so
-        // renamed to keep the fake backend's build (which never reads
-        // them) from warning that they're unused.
-        RCC: _rcc,
-        DBGMCU: _dbgmcu,
         ..
-    } = resources::init();
+    } = resources::init(resources::ClockConfiguration {
+        mcu_frequency: MCU_FREQUENCY,
+        oscillator_frequency: OSCILLATOR_FREQUENCY,
+        timepiece_is_crystal: OSCILLATOR_IS_CRYSTAL,
+    });
     // Every other field of the `Peripherals` above — every peripheral this
     // board doesn't use at all — is dropped right here.
 
@@ -268,31 +322,47 @@ pub fn initialize() -> BoardPeripherals {
         TP3_PIN,
     ];
 
-    let mut gpio = Gpio::new();
+    let (mut gpio, _fake_gpio) = resources::split_off_fake(Gpio::new());
 
     // Claims the 34 pins: on real hardware this is just a Rust move (the
     // `Peri` bound above is dropped, so it can't also be claimed through
     // `embassy_stm32`'s own pin API elsewhere); on the fake backend it
-    // additionally registers each pin as wired up, via `PinToken`.
+    // additionally registers each pin with the gpio peripheral driver so that
+    // pins that are used but not registered here trigger warnings.
     peripherals::claim_pins!(
-        gpio, PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9, PA10, PA11, PA12, PA15, PB0,
-        PB1, PB2, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB11, PB12, PB14, PB15, PC4, PC6, PC10,
-        PC11, PC13, PC14
+        gpio, PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9, PA10, PA11, PA12, PA15, PB0, PB1,
+        PB2, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB11, PB12, PB14, PB15, PC4, PC6, PC10, PC11, PC13,
+        PC14
     );
 
     for pin in pins {
         gpio.configure(pin);
     }
 
+    // `ClockProvider::new` requires `cortex_m::Peripherals` on STM32 targets.
+    // The fake backend ignores the first argument, so use `()` on test builds.
     #[cfg(target_arch = "arm")]
-    let clock_provider = ClockProvider::new(&_rcc, &_dbgmcu);
+    let mut cortex_m_peripherals = cortex_m::Peripherals::take().unwrap();
     #[cfg(not(target_arch = "arm"))]
-    let clock_provider = ClockProvider::new();
+    let mut cortex_m_peripherals = ();
+
+    let (clock_provider, _fake_clock_provider) =
+        resources::split_off_fake(ClockProvider::new(&mut cortex_m_peripherals, MCU_FREQUENCY));
+
+    #[cfg(not(target_arch = "arm"))]
+    let fakes = BoardFakePeripherals {
+        gpio: _fake_gpio,
+        clock_provider: _fake_clock_provider,
+    };
 
     BoardPeripherals {
         gpio,
         clock_provider,
         uptime: Uptime::epoch(),
+        #[cfg(not(target_arch = "arm"))]
+        fakes,
+        #[cfg(target_arch = "arm")]
+        cortex_m_peripherals,
         PA13,
         PA14,
         PB10,
