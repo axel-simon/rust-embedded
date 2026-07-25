@@ -52,10 +52,9 @@ pub const USART2_RX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 4, 7);
 
 // External PWM input for motor speed regulation (J3); inferred as TIM2_CH1
 // (AF1) since UM2516 only names it generically as "PWM". Only the pin mux
-// is set up here — no capture logic exists yet, and note that `initialize`
-// currently hands TIM2 itself to embassy_time's time driver, so an actual
-// input-capture implementation will need a different timer or a different
-// time-driver choice.
+// is set up here — no capture logic exists yet, and TIM2 itself isn't
+// claimed by anything (see resources/Cargo.toml — no `time-driver-*`
+// feature), so it's free for an actual input-capture implementation.
 pub const PWM_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 15, 1).with_pull_down();
 
 // Battery/potentiometer/NTC analog sense lines.
@@ -89,6 +88,18 @@ pub const MCU_FREQUENCY: u32 = 170_000_000;
 /// (which would only drive `PF0`, leaving `PF1` unused) — see
 /// [`resources::ClockConfiguration::timepiece_is_crystal`].
 pub const OSCILLATOR_IS_CRYSTAL: bool = true;
+
+/// Number of priority levels this MCU's interrupt controller implements,
+/// as a power-of-two exponent — RTIC needs this to compute its
+/// priority-masking limits (see `src/main.rs`'s `rtic_device` shim, which
+/// re-exports this under the name RTIC's Cortex-M backend looks for).
+/// Named processor-agnostically, rather than after the NVIC (Cortex-M's
+/// interrupt controller) specifically, since this workspace might target a
+/// non-ARM MCU some day. This STM32G431 is a Cortex-M4 part, which — like
+/// every non-Cortex-M0 STM32 family — implements 4 priority bits (16
+/// levels); see RM0440. Re-verify against the relevant reference manual if
+/// this board file is ever adapted to a different chip/architecture.
+pub const RTIC_PRIORITY_BITS: u8 = 4;
 
 /// Backend-selected [`peripherals::api::gpio::GpioTrait`] driver — see
 /// [`initialize`]. Real hardware on `target_arch = "arm"`, a fake elsewhere
@@ -164,11 +175,11 @@ pub struct BoardPeripherals {
     /// The Cortex-M core peripherals (NVIC, SCB, MPU, ...) not already
     /// claimed by [`Self::clock_provider`] (which only borrows `DCB`/`DWT`
     /// from this, via
-    /// [`peripherals::stm32g4::clock::ClockProvider::new`]) — there's
-    /// nothing to fake for a simulated core, so this only exists on real
-    /// hardware.
-    #[cfg(target_arch = "arm")]
-    pub cortex_m_peripherals: cortex_m::Peripherals,
+    /// [`peripherals::stm32g4::clock::ClockProvider::new`]) — passed
+    /// through from [`initialize`]'s own [`resources::RticContext`]
+    /// parameter, so it's `()` on the fake backend, which has nothing to
+    /// simulate a core with.
+    pub cortex_m_peripherals: resources::RticContext,
 
     /// SWDIO / JTMS — ST-LINK debug connection (J4 when the daughterboard
     /// is removed). Not managed as a `GpioPin`; firmware never drives it.
@@ -217,8 +228,15 @@ pub struct BoardPeripherals {
 /// (`embassy_stm32::init()` under the hood), or a simulated one on
 /// host/test builds — and `configure()`s every `_PIN` const above on the
 /// resulting [`peripherals::api::gpio::GpioTrait`] driver.
+///
+/// Takes a [`resources::RticContext`] (`cortex_m::Peripherals` on real
+/// hardware, `()` on the fake backend — one argument either way) rather
+/// than calling [`cortex_m::Peripherals::take`] itself, since, with RTIC
+/// back in the picture, RTIC's own `init` prologue already steals that
+/// singleton (via `cortex_m::Peripherals::steal()`) before calling into
+/// application code — a second `::take()` here would panic.
 #[allow(non_snake_case)]
-pub fn initialize() -> BoardPeripherals {
+pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeripherals {
     let resources::Peripherals {
         // The 34 pins this board assigns a role to (see the `_PIN` consts
         // above) — claimed below via `claim_pins!`, not stored on
@@ -339,13 +357,6 @@ pub fn initialize() -> BoardPeripherals {
         gpio.configure(pin);
     }
 
-    // `ClockProvider::new` requires `cortex_m::Peripherals` on STM32 targets.
-    // The fake backend ignores the first argument, so use `()` on test builds.
-    #[cfg(target_arch = "arm")]
-    let mut cortex_m_peripherals = cortex_m::Peripherals::take().unwrap();
-    #[cfg(not(target_arch = "arm"))]
-    let mut cortex_m_peripherals = ();
-
     let (clock_provider, _fake_clock_provider) =
         resources::split_off_fake(ClockProvider::new(&mut cortex_m_peripherals, MCU_FREQUENCY));
 
@@ -361,7 +372,6 @@ pub fn initialize() -> BoardPeripherals {
         uptime: Uptime::epoch(),
         #[cfg(not(target_arch = "arm"))]
         fakes,
-        #[cfg(target_arch = "arm")]
         cortex_m_peripherals,
         PA13,
         PA14,

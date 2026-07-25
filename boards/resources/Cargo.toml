@@ -18,4 +18,18 @@ peripherals = { path = "../../peripherals" }
 # types resources.rs aliases to on the arm target. Host builds use
 # fake_embassy.rs instead, so this is target-gated.
 [target.'cfg(target_arch = "arm")'.dependencies]
-embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "time-driver-tim2", "rt"] }
+# No `time-driver-*` feature: that would silently swallow whichever timer
+# it names into embassy's own `embassy_time` integration, making it
+# unavailable in `Peripherals` — nothing here uses `embassy_time` (this
+# workspace's own DWT-cycle-counter-backed `peripherals::stm32g4::clock`
+# handles timekeeping instead), so there's no reason to give up a timer for
+# it.
+embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "rt"] }
+# `RticContext` (see stm32g4.rs).
+cortex-m = "0.7.7"
+# Registers the RTT logging backend `defmt::info!` (called from
+# src/main.rs) dispatches through, and the `#[panic_handler]` — see
+# stm32g4.rs. Neither is referenced by name anywhere, so linking them in
+# at all requires this crate (which really is used) to import them.
+defmt-rtt = "1.3.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }

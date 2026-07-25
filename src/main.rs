@@ -6,17 +6,18 @@ use esc1_discovery::{BoardPeripherals, ClockProvider, Gpio};
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::gpio::GpioTrait;
 
-#[cfg(not(test))]
-use cortex_m_rt::entry;
-#[cfg(not(test))]
-use {defmt_rtt as _, panic_probe as _};
+// `#[rtic_shim::app]` generates its own entry point on real hardware (see
+// the `app` module below), replacing the usual `#[cortex_m_rt::entry]`.
+// The RTT logging backend/panic handler `defmt`/`no_std` need are
+// registered from `boards/resources` instead (see its `stm32g4.rs`).
 
 // Make the LED blink at 1Hz.
 const HALF_PERIOD: Duration = Duration::from_millis(500);
 
 /// Everything the firmware does after chip bring-up, one blink at a time.
-/// Kept separate from [`main`] so it can be driven by unit tests (see the
-/// `tests` module below) without a `-> !` loop or real hardware.
+/// Kept separate from the `app` module below so it can be driven by unit
+/// tests (see the `tests` module) without a real interrupt-driven
+/// scheduler.
 struct Firmware {
     gpio: Gpio,
     clock_provider: ClockProvider,
@@ -61,14 +62,85 @@ impl Firmware {
     }
 }
 
-#[cfg(not(test))]
-#[entry]
-fn main() -> ! {
-    defmt::info!("init");
+/// `stm32-metapac` mirrors an svd2rust PAC's register blocks (used
+/// directly, e.g. `stm32_metapac::GPIOA`, by `peripherals::stm32g4`) but
+/// doesn't generate a `NVIC_PRIO_BITS` const the way a real svd2rust PAC
+/// does — `#[rtic::app]`'s `device` argument needs one under exactly that
+/// name (to compute its priority-masking limits) even with zero
+/// interrupt-bound tasks. The actual value is a board fact (it depends on
+/// the MCU, not on this application), so it's defined as
+/// [`esc1_discovery::RTIC_PRIORITY_BITS`] and just re-exported here under
+/// the name RTIC's Cortex-M backend looks for.
+#[cfg(target_arch = "arm")]
+mod rtic_device {
+    // `allow`: nothing here needs `Interrupt`/register-block re-exports
+    // until a real interrupt-bound task exists; kept for when one does.
+    #[allow(unused_imports)]
+    pub use stm32_metapac::*;
+    pub use esc1_discovery::RTIC_PRIORITY_BITS as NVIC_PRIO_BITS;
+}
 
-    let mut firmware = Firmware::new(esc1_discovery::initialize());
-    loop {
-        firmware.step();
+/// The application's RTIC task graph — real RTIC on real hardware, or (via
+/// [`rtic_shim::app`]) a host-only fake that hands `init`'s `Local`
+/// straight to unit tests, so they can drive [`Firmware::step`] directly
+/// without a real interrupt-driven scheduler. `rtic_shim::app` always
+/// forces `peripherals = false` (see `rtic_real`): chip bring-up in this
+/// workspace always goes through a board crate's own `initialize()`
+/// (`embassy_stm32::init()` under the hood), not RTIC's own PAC-peripherals
+/// claim — `stm32_metapac` doesn't even expose the `Peripherals` type that
+/// would need.
+#[rtic_shim::app(device = crate::rtic_device)]
+mod app {
+    use super::Firmware;
+
+    #[shared]
+    pub(crate) struct Shared {}
+
+    // `pub(crate)`: `#[cfg(test)] mod tests` (a sibling of this module, not
+    // a descendant) needs to reach these fields directly.
+    #[local]
+    pub(crate) struct Local {
+        pub(crate) firmware: Firmware,
+        #[cfg(not(target_arch = "arm"))]
+        pub(crate) fakes: esc1_discovery::BoardFakePeripherals,
+    }
+
+    #[init]
+    fn init(_cx: init::Context) -> (Shared, Local) {
+        #[cfg(not(test))]
+        defmt::info!("init");
+
+        // RTIC's own `init` prologue already steals `cortex_m::Peripherals`
+        // (that's `cx.core`) before calling this, so it's threaded through
+        // rather than taken again — see `initialize`'s doc comment.
+        #[cfg(target_arch = "arm")]
+        let peripherals = esc1_discovery::initialize(_cx.core);
+        #[cfg(not(target_arch = "arm"))]
+        let peripherals = esc1_discovery::initialize(());
+
+        #[cfg(not(target_arch = "arm"))]
+        let fakes = peripherals.fakes.clone(); // cheap: Rc-backed
+
+        let firmware = Firmware::new(peripherals);
+
+        (
+            Shared {},
+            Local {
+                firmware,
+                #[cfg(not(target_arch = "arm"))]
+                fakes,
+            },
+        )
+    }
+
+    // `mut`: only the fake (host) `idle::Context` needs it, since it owns
+    // `Local` by value rather than borrowing it — see `rtic_fake`.
+    #[allow(unused_mut)]
+    #[idle(local = [firmware])]
+    fn idle(mut cx: idle::Context) -> ! {
+        loop {
+            cx.local.firmware.step();
+        }
     }
 }
 
@@ -78,9 +150,9 @@ mod tests {
 
     #[test]
     fn led_blinks_at_roughly_1hz() {
-        let peripherals = esc1_discovery::initialize();
-        let fakes = peripherals.fakes.clone(); // cheap: Rc-backed
-        let mut firmware = Firmware::new(peripherals);
+        let (_shared, local) = app::init(app::init::Context);
+        let fakes = local.fakes.clone(); // cheap: Rc-backed
+        let mut firmware = local.firmware;
 
         firmware.step();
         // Each `step()` is a full on/off cycle, so the LED is off again by

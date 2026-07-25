@@ -14,6 +14,11 @@ pub type Peripherals = fake_embassy::Peripherals;
 pub type Peri<'d, T> = fake_embassy::Peri<'d, T>;
 pub use fake_embassy::peripherals;
 
+/// See `stm32g4::RticContext`'s doc comment — there's no real
+/// `cortex_m::Peripherals` to hand a board's `initialize()` here, so it's
+/// just unit.
+pub type RticContext = ();
+
 /// Brings up a simulated chip and hands back ownership of every
 /// peripheral singleton. Ignores `_clock_configuration` — there's no real
 /// clock tree to configure here.

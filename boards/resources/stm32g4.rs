@@ -4,17 +4,24 @@
 
 use crate::ClockConfiguration;
 
+// Neither is referenced by name — `defmt-rtt` registers the RTT logging
+// backend `defmt::info!` calls dispatch through, and `panic-probe` registers
+// the `#[panic_handler]`. This crate is a good home for them since it's the
+// one that already knows this is real hardware, and (being genuinely used)
+// actually gets linked into the final binary — see `Cargo.toml`'s comment on
+// these two dependencies.
+use {defmt_rtt as _, panic_probe as _};
+
 pub type Peripherals = embassy_stm32::Peripherals;
 pub type Peri<'d, T> = embassy_stm32::Peri<'d, T>;
 pub use embassy_stm32::peripherals;
 
+// RTIC requires access to the CPU. On STM32, this is provided by Cortex-M
+// crate.
+pub type RticContext = cortex_m::Peripherals;
+
 /// Brings up the chip and hands back ownership of every peripheral
 /// singleton.
-///
-/// `embassy_stm32::init()` only enables a peripheral's clock when its own
-/// driver claims that peripheral; the board's register-level `Gpio`
-/// driver bypasses that entirely, so `Gpio::new()` enables every GPIO
-/// port's clock itself, rather than this doing it up front.
 pub fn init(clock_configuration: ClockConfiguration) -> Peripherals {
     let config = clock_config(
         clock_configuration.oscillator_frequency,
@@ -127,10 +134,7 @@ fn clock_config(
 /// `(value, fake_handle)`, so a test can get a handle onto the same
 /// simulated peripheral firmware gets) — so board init code can write
 /// `let (value, fake) = split_off_fake(SomeDriver::new(...));`
-/// unconditionally, for any peripheral driver following this pattern
-/// (e.g. `peripherals::stm32g4::gpio::Gpio`,
-/// `peripherals::stm32g4::clock::ClockProvider`), without its own
-/// `target_arch` branch for this.
+/// unconditionally.
 pub fn split_off_fake<T>(value: T) -> (T, ()) {
     (value, ())
 }

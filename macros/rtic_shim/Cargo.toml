@@ -1,0 +1,11 @@
+[package]
+name = "rtic_shim"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+rtic_real = { path = "../rtic_real" }
+
+[target.'cfg(not(target_arch = "arm"))'.dependencies]
+rtic_fake = { path = "../rtic_fake" }

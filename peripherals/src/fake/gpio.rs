@@ -15,7 +15,7 @@ use std::rc::Rc;
 use crate::api::gpio::{GpioMode, GpioPin, GpioPort, GpioPull, GpioTrait};
 
 const NUM_PORTS: usize = 10; // PA..=PJ
-const PINS_PER_PORT: usize = 32; // pin_number is a 5-bit value (0..=31)
+const PINS_PER_PORT: usize = 256; // pin_number is a u8.
 
 /// Implemented by any type that knows its own physical GPIO identity —
 /// e.g. a test-local pin-identity type, or (via a blanket impl over its
@@ -24,14 +24,15 @@ const PINS_PER_PORT: usize = 32; // pin_number is a 5-bit value (0..=31)
 /// to register a claimed pin.
 ///
 /// The real driver ([`crate::stm32g4::gpio::Gpio::claim_pin`]) can't do
-/// the same: it's called with real `embassy_stm32::Peri<'static,
-/// embassy_stm32::peripherals::PAx>` values, and no crate in this
-/// workspace is allowed to implement this trait for those — `PinToken` is
-/// foreign to whichever crate would want to write that `impl` (it's
-/// defined here, in `peripherals`), and so are `embassy_stm32`'s pin
-/// types (defined in `embassy_stm32`), which is exactly what Rust's
-/// orphan rule forbids. Ownership (a plain move of `pin`) is the only
-/// bookkeeping available there instead.
+/// the same: it's called with real values from whichever embassy-X
+/// backend a board uses (e.g. `embassy_stm32::Peri<'static,
+/// embassy_stm32::peripherals::PAx>`), and no crate in this workspace is
+/// allowed to implement this trait for those — `PinToken` is foreign to
+/// whichever crate would want to write that `impl` (it's defined here, in
+/// `peripherals`), and so are the backend's own pin types (e.g. defined in
+/// `embassy_stm32`), which is exactly what Rust's orphan rule forbids.
+/// Ownership (a plain move of `pin`) is the only bookkeeping available
+/// there instead.
 pub trait PinToken {
     const PORT: GpioPort;
     const NUMBER: u8;
@@ -122,13 +123,13 @@ impl Gpio {
 
     /// Claims ownership of a pin-resource handle and registers it as
     /// "wired up" — e.g. a fake `resources::Peri<'static,
-    /// resources::peripherals::PAx>` stand-in for a real
-    /// `embassy_stm32::Peri`, or a bare test-local pin-identity type.
-    /// `T: PinToken` is how the identity to register is recovered (real
-    /// `embassy_stm32` pin types can't implement it without violating
-    /// Rust's orphan rule, which is why
-    /// [`Gpio::claim_pin`](crate::stm32g4::gpio::Gpio::claim_pin) can't do
-    /// the same). [`crate::claim_pins!`] calls this once per pin for a
+    /// resources::peripherals::PAx>` stand-in for a real embassy-X
+    /// backend's `Peri` (e.g. `embassy_stm32::Peri`), or a bare test-local
+    /// pin-identity type. `T: PinToken` is how the identity to register is
+    /// recovered (the real backend's own pin types, e.g. `embassy_stm32`'s,
+    /// can't implement it without violating Rust's orphan rule, which is
+    /// why [`Gpio::claim_pin`](crate::stm32g4::gpio::Gpio::claim_pin) can't
+    /// do the same). [`crate::claim_pins!`] calls this once per pin for a
     /// whole list at once.
     pub fn claim_pin<T: PinToken>(&mut self, _pin: T) {
         let port = &self.0.ports[T::PORT as usize];

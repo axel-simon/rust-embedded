@@ -1,29 +1,37 @@
-//! A hand-rolled mirror of `embassy_stm32::Peripherals` (and the
-//! `embassy_stm32::peripherals` marker-type module it's built from) for
-//! this chip/feature configuration (STM32G431CB, `time-driver-tim2`),
-//! used only on host/test builds where no real `embassy_stm32` exists.
+//! A hand-rolled mirror of an embassy-X backend's `Peripherals` type (and
+//! the `peripherals` marker-type module it's built from) — e.g.
+//! `embassy_stm32::Peripherals`, or whichever `embassy-*` crate a
+//! different board in this workspace ends up targeting — used only on
+//! host/test builds, where no real embassy backend exists.
 //!
-//! The identifier list passed to [`fake_peripherals!`] below was
-//! extracted directly from the `embassy_hal_internal::peripherals_struct!`
-//! invocation in `embassy-stm32`'s own build-time-generated
-//! `_generated.rs` for this exact chip+feature combination (found under
-//! `target/*/build/embassy-stm32-*/out/_generated.rs` after a build) —
-//! 130 identifiers, `TIM2` already excluded there because the
-//! `time-driver-tim2` feature claims it internally, so it's genuinely
-//! absent from the real `Peripherals` struct in this build configuration.
-//! Keep this list in sync by hand if the chip or its enabled features
-//! change.
+//! This isn't scoped to one chip or one embassy backend: the identifier
+//! list passed to [`fake_peripherals!`] below is meant to hold the union
+//! of every peripheral singleton any board's real backend exposes, so
+//! more boards/chips/backends can add to it over time rather than needing
+//! a fake of their own. Right now it only covers the B-G431B-ESC1's
+//! STM32G431CB — extracted directly from the
+//! `embassy_hal_internal::peripherals_struct!` invocation in
+//! `embassy-stm32`'s own build-time-generated `_generated.rs` for that
+//! exact chip+feature combination (found under
+//! `target/*/build/embassy-stm32-*/out/_generated.rs` after a build) — 131
+//! identifiers. Deliberately no `time-driver-*` feature enabled: that
+//! would silently remove whichever timer it names from this list (see
+//! `resources/Cargo.toml`), so this fake wouldn't even reflect what's
+//! really available. Keep each board's contribution in sync by hand as
+//! its chip, enabled features, or embassy backend change — same process
+//! regardless of which `embassy-*` crate and generated file it comes from.
 
 use core::marker::PhantomData;
 
 use ::peripherals::api::gpio::GpioPort;
 use ::peripherals::fake::gpio::PinToken;
 
-/// A minimal, self-contained stand-in for `embassy_stm32::Peri<'d, T>`:
-/// just enough shape (a value plus a borrowed lifetime) for board code to
-/// hold one as a field. Unlike the real thing, this doesn't need to
-/// enforce anything at runtime — it exists purely so generic board code
-/// compiles the same way whether it's naming `resources::Peri<'static,
+/// A minimal, self-contained stand-in for an embassy-X backend's
+/// `Peri<'d, T>` (e.g. `embassy_stm32::Peri<'d, T>`): just enough shape (a
+/// value plus a borrowed lifetime) for board code to hold one as a field.
+/// Unlike the real thing, this doesn't need to enforce anything at
+/// runtime — it exists purely so generic board code compiles the same way
+/// whether it's naming `resources::Peri<'static,
 /// resources::peripherals::PA8>` on real hardware or in a host-side test.
 pub struct Peri<'d, T>(T, PhantomData<&'d mut T>);
 
@@ -52,25 +60,26 @@ impl<'d, T: PinToken> PinToken for Peri<'d, T> {
 macro_rules! fake_peripherals {
     ($($name:ident),+ $(,)?) => {
         /// Zero-sized marker types, one per peripheral singleton — mirrors
-        /// `embassy_stm32::peripherals`.
+        /// the real embassy-X backend's own `peripherals` module.
         pub mod peripherals {
             $(
-                #[doc = concat!("Fake stand-in for `embassy_stm32::peripherals::", stringify!($name), "`.")]
+                #[doc = concat!("Fake stand-in for the real embassy-X backend's `peripherals::", stringify!($name), "` marker type.")]
                 #[allow(non_camel_case_types)]
                 #[derive(Debug, Clone, Copy)]
                 pub struct $name;
             )+
         }
 
-        /// Mirrors `embassy_stm32::Peripherals` field-for-field.
+        /// Mirrors the real embassy-X backend's `Peripherals` struct
+        /// field-for-field.
         #[allow(non_snake_case)]
         pub struct Peripherals {
             $(pub $name: Peri<'static, peripherals::$name>,)+
         }
 
-        /// Mirrors `embassy_stm32::init()`: hands out one of every
-        /// peripheral singleton, all pre-"claimed" since there's no real
-        /// hardware to bring up.
+        /// Mirrors the real embassy-X backend's `init()`: hands out one of
+        /// every peripheral singleton, all pre-"claimed" since there's no
+        /// real hardware to bring up.
         pub fn init() -> Peripherals {
             Peripherals {
                 $($name: Peri::new(peripherals::$name),)+
@@ -89,8 +98,8 @@ fake_peripherals!(
     // Analog (14)
     ADC1, ADC12_COMMON, ADC2, COMP1, COMP2, COMP3, COMP4, DAC1, DAC3,
     OPAMP1, OPAMP2, OPAMP3, VREFBUF, VREFINTCAL,
-    // Timers (9; TIM2 excluded, see module doc comment)
-    TIM1, TIM15, TIM16, TIM17, TIM3, TIM4, TIM6, TIM7, TIM8,
+    // Timers (10)
+    TIM1, TIM15, TIM16, TIM17, TIM2, TIM3, TIM4, TIM6, TIM7, TIM8,
     // DMA (3 controller/mux blocks + 12 channels)
     DMA1, DMA2, DMAMUX1,
     DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6,
