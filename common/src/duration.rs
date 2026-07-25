@@ -2,7 +2,8 @@ use core::ops::{Add, Mul, Sub};
 
 use crate::i64_divider::I64Divider;
 
-/// Precomputed dividers for [`Duration::from_millis`]/[`Duration::from_micros`]/
+/// Precomputed dividers for
+/// [`Duration::from_millis`]/[`Duration::from_micros`]/
 /// [`Duration::from_nanos`] — each `const`, so the reciprocal they're built
 /// from (see [`I64Divider::new`]) is computed once at compile time rather
 /// than on every call.
@@ -73,7 +74,8 @@ impl Duration {
         ((self.fraction() as u64 * 1_000_000) >> 32) as u32
     }
 
-    /// Fractional part of a second, in nanoseconds.
+    /// Fractional part of a second, in nanoseconds, that is, the returned
+    /// value is always in the range 0..=999_999_999.
     pub fn fraction_as_nanos(self) -> u32 {
         ((self.fraction() as u64 * 1_000_000_000) >> 32) as u32
     }
@@ -247,7 +249,10 @@ mod tests {
             // remainder by up to 1 ms, but never more, and never overshoot.
             let remainder = (ms % 1_000) as u32;
             let got = d.fraction_as_millis();
-            assert!(got == remainder || got + 1 == remainder, "ms={ms} got={got}");
+            assert!(
+                got == remainder || got + 1 == remainder,
+                "ms={ms} got={got}"
+            );
         }
     }
 }

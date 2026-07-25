@@ -22,17 +22,20 @@ impl Uptime {
         self.0.fraction()
     }
 
-    /// Fractional part of a second since boot, in milliseconds.
+    /// Fractional part of a second since boot, in milliseconds, that is, the
+    /// returned value is always in the range 0..=999.
     pub fn fraction_as_millis(self) -> u32 {
         self.0.fraction_as_millis()
     }
 
-    /// Fractional part of a second since boot, in microseconds.
+    /// Fractional part of a second since boot, in microseconds, that is, the
+    /// returned value is always in the range 0..=999_999.
     pub fn fraction_as_micros(self) -> u32 {
         self.0.fraction_as_micros()
     }
 
-    /// Fractional part of a second since boot, in nanoseconds.
+    /// Fractional part of a second since boot, in nanoseconds, that is, the
+    /// returned value is always in the range 0..=999_999_999.
     pub fn fraction_as_nanos(self) -> u32 {
         self.0.fraction_as_nanos()
     }
