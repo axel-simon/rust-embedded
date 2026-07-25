@@ -85,14 +85,19 @@ impl From<f32> for UnitInterval {
     /// the largest representable value, just below `1`. Relies on the
     /// float-to-int `as` cast already being saturating (NaN -> 0, out of
     /// range -> the nearest bound) since Rust 1.45.
+    ///
+    /// Stays in `f32` throughout (no `f64`, which the target MCU has no
+    /// hardware support for): `4_294_967_296.0` is `2^32`, an exact power
+    /// of two, so multiplying by it only shifts the exponent and doesn't
+    /// need any extra mantissa precision.
     fn from(value: f32) -> Self {
-        UnitInterval((value as f64 * 4_294_967_296.0) as u32)
+        UnitInterval((value * 4_294_967_296.0) as u32)
     }
 }
 
 impl From<UnitInterval> for f32 {
     fn from(u: UnitInterval) -> f32 {
-        (u.0 as f64 / 4_294_967_296.0) as f32
+        u.0 as f32 / 4_294_967_296.0
     }
 }
 
@@ -183,14 +188,19 @@ impl From<f32> for SymmetricUnitInterval {
     /// largest representable value (just below `1`), and NaN becomes `0`.
     /// Relies on the float-to-int `as` cast already being saturating
     /// (NaN -> 0, out of range -> the nearest bound) since Rust 1.45.
+    ///
+    /// Stays in `f32` throughout (no `f64`, which the target MCU has no
+    /// hardware support for): `2_147_483_648.0` is `2^31`, an exact power
+    /// of two, so multiplying by it only shifts the exponent and doesn't
+    /// need any extra mantissa precision.
     fn from(value: f32) -> Self {
-        SymmetricUnitInterval((value as f64 * 2_147_483_648.0) as i32)
+        SymmetricUnitInterval((value * 2_147_483_648.0) as i32)
     }
 }
 
 impl From<SymmetricUnitInterval> for f32 {
     fn from(s: SymmetricUnitInterval) -> f32 {
-        (s.0 as f64 / 2_147_483_648.0) as f32
+        s.0 as f32 / 2_147_483_648.0
     }
 }
 
