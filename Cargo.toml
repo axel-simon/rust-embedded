@@ -9,6 +9,7 @@ members = [
     "macros/rtic_fake",
     "firmware/benchtest/blinky",
     "firmware/benchtest/adc",
+    "firmware/benchtest/cordic",
 ]
 # `cargo build`/`cargo run` without `-p` operate on this member only, so the
 # existing "just run it" workflow (see README.md) keeps working now that

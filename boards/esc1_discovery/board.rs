@@ -159,6 +159,20 @@ pub type Dma = peripherals::fake::dma::Dma;
 #[cfg(not(target_arch = "arm"))]
 pub type FakeDma = peripherals::fake::dma::FakeDma;
 
+/// Backend-selected
+/// [`peripherals::api::math_coprocessor::MathCoprocessorTrait`] driver for
+/// [`BoardPeripherals::math_coprocessor`] — see [`initialize`]. Real
+/// hardware on `target_arch = "arm"`, a fake elsewhere (so host-side
+/// `cargo test` works without hardware). Unlike [`Gpio`]/[`ClockProvider`]/
+/// [`Adc`]/[`Dma`], neither backend's `new()` needs a paired test-facing
+/// handle — there's no external state (pin levels, simulated time, sample
+/// buffers, channel claims) for a test to observe or force, so this has no
+/// `Fake*` counterpart and no entry in [`BoardFakePeripherals`].
+#[cfg(target_arch = "arm")]
+pub type MathCoprocessor = peripherals::stm32g4::math_coprocessor::MathCoprocessor;
+#[cfg(not(target_arch = "arm"))]
+pub type MathCoprocessor = peripherals::fake::math_coprocessor::MathCoprocessor;
+
 /// A test's own handles onto the fake peripherals backing a
 /// [`BoardPeripherals`] returned by [`initialize`] on host/test builds —
 /// the counterpart of [`BoardPeripherals::gpio`]/
@@ -207,6 +221,10 @@ pub struct BoardPeripherals {
     /// picks which channel sequence to convert. Its conversions are
     /// DMA-driven over [`Self::dma`]'s DMA2 channel 1 (see `initialize`).
     pub adc1: Adc,
+    /// Math-coprocessor for trigonometric/Cartesian-to-polar functions not
+    /// implemented on the Cortex-M4's FPU — see
+    /// [`peripherals::api::math_coprocessor::MathCoprocessorTrait`].
+    pub math_coprocessor: MathCoprocessor,
     /// Time elapsed since boot, as of the last time it was refreshed (see
     /// [`peripherals::api::clock::ClockTrait::now`]). Starts at
     /// [`Uptime::epoch`] here; nothing in [`initialize`] refreshes it yet.
@@ -446,6 +464,11 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
     #[cfg(not(target_arch = "arm"))]
     let (adc1, _fake_adc1) = resources::split_off_fake(Adc::new());
 
+    // No `split_off_fake`: both backends' `new()` return a plain `Self`,
+    // not a `(value, fake)` pair — see `MathCoprocessor`'s doc comment for
+    // why there's nothing to split off.
+    let math_coprocessor = MathCoprocessor::new();
+
     #[cfg(not(target_arch = "arm"))]
     let fakes = BoardFakePeripherals {
         gpio: _fake_gpio,
@@ -459,6 +482,7 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
         clock_provider,
         dma,
         adc1,
+        math_coprocessor,
         uptime: Uptime::epoch(),
         #[cfg(not(target_arch = "arm"))]
         fakes,
