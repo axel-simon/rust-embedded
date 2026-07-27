@@ -10,11 +10,39 @@ license = "MIT OR Apache-2.0"
 common = { path = "../common" }
 
 # Real STM32G4 GPIO and clock drivers (src/stm32g4/gpio.rs,
-# src/stm32g4/clock.rs). Chip variant must match the workspace root's
-# stm32g4xx-hal feature (see root Cargo.toml): STM32G431CB (B-G431B-ESC1
-# Discovery kit). Target-gated to arm so host-side `cargo test` (see
-# README.md) never tries to compile it.
+# src/stm32g4/clock.rs). Chip variant is picked via this crate's own
+# `[features]` below (default: STM32G431CB, the B-G431B-ESC1 Discovery
+# kit), which just forwards to `stm32-metapac`'s own same-named feature —
+# no chip feature is hardcoded here, so `stm32g4::quadrature`'s TIM5/TIM20
+# support (see its doc comment) can gate on whichever one the caller picked
+# instead of a separately-invented capability flag. Target-gated to arm so
+# host-side `cargo test` (see README.md) never tries to compile it.
 [target.'cfg(target_arch = "arm")'.dependencies]
-stm32-metapac = { version = "21", features = ["stm32g431cb"] }
+# No chip feature listed here — `stm32-metapac`'s own default features
+# (just `pac`: register-block access, e.g. `stm32_metapac::RCC`) are kept
+# as-is; the actual chip comes from this crate's own `[features]` below.
+stm32-metapac = { version = "21" }
 # DWT/DCB core-peripheral access for the cycle-counter-based clock driver.
 cortex-m = "0.7.7"
+# `defmt::error!(...)` in src/stm32g4/quadrature.rs, logged when
+# `QuadratureTrait::open` is asked for TIM5/TIM20 on a chip feature (see
+# below) that doesn't have them — the RTT logging backend it needs is
+# registered by `boards/resources`, not this crate.
+defmt = "1.1.1"
+
+[features]
+default = ["stm32g431cb"]
+# One feature per STM32G4 chip variant this crate can target, each just
+# forwarding to `stm32-metapac`'s own same-named feature (the one it uses
+# to pick which MCU's register/peripheral definitions to generate — see
+# its build.rs, which panics if zero or more than one chip feature ends up
+# enabled on it). `stm32g4::quadrature` gates its TIM5/TIM20 support on
+# these directly, since both only exist on category-3/4 chips like
+# STM32G474 — not on the STM32G431CB every board in this workspace
+# currently targets. Add more variants here as boards target them; only
+# `stm32g431cb` (the default) and `stm32g474re` (used to verify the
+# TIM5/TIM20 path actually compiles against a chip that has them) exist so
+# far. Switch chips with e.g. `cargo build --no-default-features --features
+# stm32g474re`.
+stm32g431cb = ["stm32-metapac/stm32g431cb"]
+stm32g474re = ["stm32-metapac/stm32g474re"]

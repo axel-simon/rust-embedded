@@ -149,7 +149,11 @@ fn enable_gpio_clocks() {
 /// but no board using this crate ever constructs a `GpioPin` on one (this
 /// chip has no such physical pins), so `pin.port()` can never actually be
 /// `PH`/`PI`/`PJ` at runtime.
-fn gpio_block(port: GpioPort) -> stm32_metapac::gpio::Gpio {
+///
+/// `pub(crate)` so [`crate::stm32g4::quadrature`] can read a plain digital
+/// pin's live level (its `zero_input`) the same stateless way
+/// [`Gpio::get`] does, without needing to hold (or be passed) a `&Gpio`.
+pub(crate) fn gpio_block(port: GpioPort) -> stm32_metapac::gpio::Gpio {
     match port {
         GpioPort::PA => stm32_metapac::GPIOA,
         GpioPort::PB => stm32_metapac::GPIOB,

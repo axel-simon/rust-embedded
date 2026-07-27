@@ -35,10 +35,14 @@ pub const BACK_EMF2_PIN: GpioPin = GpioPin::analog(GpioPort::PC, 4);
 pub const BACK_EMF3_PIN: GpioPin = GpioPin::analog(GpioPort::PB, 11);
 pub const GPIO_BACK_EMF_PIN: GpioPin = GpioPin::input(GpioPort::PB, 5);
 
-// Hall-effect sensor inputs (J8).
-pub const HALL_A_PIN: GpioPin = GpioPin::input(GpioPort::PB, 6);
-pub const HALL_B_PIN: GpioPin = GpioPin::input(GpioPort::PB, 7);
-pub const HALL_Z_PIN: GpioPin = GpioPin::input(GpioPort::PB, 8);
+// Hall-effect sensor header (J8) — repurposed as TIM4's encoder-capable
+// channel inputs (AF2): TIM4_CH1/CH2 decode a quadrature encoder's A/B
+// phases (see firmware/benchtest/quadrature), TIM4_CH3 is free for its
+// index/Z pulse. No longer available as plain digital Hall inputs while
+// configured this way.
+pub const TIM4_CH1_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 6, 2);
+pub const TIM4_CH2_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 7, 2);
+pub const TIM4_CH3_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 8, 2);
 
 // CAN bus (FDCAN1_RX/TX, AF9) plus its termination switch and transceiver
 // shutdown/TP2.
@@ -394,9 +398,9 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
         BACK_EMF2_PIN,
         BACK_EMF3_PIN,
         GPIO_BACK_EMF_PIN,
-        HALL_A_PIN,
-        HALL_B_PIN,
-        HALL_Z_PIN,
+        TIM4_CH1_PIN,
+        TIM4_CH2_PIN,
+        TIM4_CH3_PIN,
         CAN_RX_PIN,
         CAN_TX_PIN,
         CAN_TERM_PIN,
