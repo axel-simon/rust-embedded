@@ -98,13 +98,13 @@ impl FakeClockProvider {
 
     /// Jumps simulated time forward by `duration` directly, without a
     /// firmware handle needing to call
-    /// [`ClockTrait::wait_for`]/[`ClockProviderTrait::advance_reference_point`]
-    /// — keeps the raw tick counter (which [`ClockFake::ticks_now`] reads)
+    /// [`ClockTrait::wait_for`]/
+    /// [`ClockProviderTrait::advance_reference_point`] — keeps the raw
+    /// tick counter (which [`ClockFake::ticks_now`] reads)
     /// and the reference point in sync, the same invariant
     /// [`ClockProviderTrait::advance_reference_point`] maintains.
     pub fn advance_by(&mut self, duration: Duration) {
-        let delta_ticks =
-            ((duration.raw() as i128 * self.0.ticks_per_second as i128) >> 32) as u32;
+        let delta_ticks = ((duration.raw() as i128 * self.0.ticks_per_second as i128) >> 32) as u32;
         self.0.ticks.fetch_add(delta_ticks, Ordering::Relaxed);
         self.0.reference.borrow_mut().advance_by(delta_ticks);
     }

@@ -1,38 +1,56 @@
 # rust-embedded
 
-Firmware for the STM32G431 (B-G431B-ESC1 Discovery kit) that blinks the
-board's status LED on **PC6**. `main.rs` calls
-[`esc1_discovery::initialize()`](boards/esc1_discovery/init.rs), which
+Firmware for the STM32G431 (B-G431B-ESC1 Discovery kit). Each binary lives
+under [`firmware/benchtest/`](firmware/benchtest), one directory per
+program:
+
+- [`blinky`](firmware/benchtest/blinky) — blinks the board's status LED on
+  **PC6** at 1Hz. The default binary (see `default-members` in
+  [Cargo.toml](Cargo.toml)) — `cargo build`/`cargo run` without `-p`
+  target this one.
+- [`adc`](firmware/benchtest/adc) — samples ADC1 channel 1 (the
+  potentiometer, **PB12**) every 200ms and logs the raw reading via
+  `defmt`.
+
+Each firmware's `main.rs` calls
+[`esc1_discovery::initialize()`](boards/esc1_discovery/board.rs), which
 brings up the chip via `embassy_stm32::init()`, configures every pin
 declared in [`boards/esc1_discovery/board.rs`](boards/esc1_discovery/board.rs)
 (the B-G431B-ESC1's full Table 4 pin map) through the register-level
 `Gpio` driver in the [`peripherals`](peripherals) crate, and hands back a
-`Peripherals { gpio, delay }` bundle. `main.rs` then loops, toggling the
-LED with `gpio.set(...)` and pacing itself with `delay.delay_ms(100)`
-(`embassy_time::Delay`, blocking — no async executor involved).
+`BoardPeripherals` bundle (GPIO, clock, ADC1, ...) for the firmware to
+drive.
 
 `peripherals` and `boards/esc1_discovery` are hardware-agnostic where it
-matters: `peripherals` also ships a fake `GpioTrait` backend for host-side
-testing (see [peripherals/README.md](peripherals/README.md)), and
-`esc1_discovery::initialize()` uses that fake backend automatically when
-built for a non-`arm` target.
+matters: `peripherals` also ships fake `GpioTrait`/`ClockTrait`/`AdcTrait`
+backends for host-side testing (see
+[peripherals/README.md](peripherals/README.md)), and
+`esc1_discovery::initialize()` uses those fake backends automatically when
+built for a non-`arm` target — each firmware's own `#[cfg(test)] mod
+tests` drives its `Firmware` struct against them with `cargo test -p
+<name> --target <your-host-triple>`.
 
 Targets the **STM32G431CB** variant (e.g. B-G431B-ESC1) by default. For a
 different G431 package/flash size, change the `stm32g431cb` feature in
 [boards/esc1_discovery/Cargo.toml](boards/esc1_discovery/Cargo.toml) (see
 `embassy-stm32`'s `Cargo.toml` for the full list of chip features) and in
-[peripherals/Cargo.toml](peripherals/Cargo.toml), update
-[memory.x](memory.x) with the matching flash/RAM sizes, and update the
-`--chip` value in [.cargo/config.toml](.cargo/config.toml) to match.
+[peripherals/Cargo.toml](peripherals/Cargo.toml), update each firmware's
+own `memory.x` (e.g.
+[firmware/benchtest/blinky/memory.x](firmware/benchtest/blinky/memory.x))
+with the matching flash/RAM sizes, and update the `--chip` value in
+[.cargo/config.toml](.cargo/config.toml) to match.
 
 ## Build
 
 ```sh
-cargo build --release
+cargo build --release          # blinky only (the default member)
+cargo build --release --workspace   # every crate, including both firmware binaries
+cargo build --release -p adc   # a specific firmware binary
 ```
 
 ## Flash & run (requires a probe, e.g. ST-Link, and `probe-rs` installed)
 
 ```sh
-cargo run --release
+cargo run --release       # blinky
+cargo run --release -p adc
 ```
