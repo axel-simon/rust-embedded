@@ -11,6 +11,10 @@ program:
 - [`adc`](firmware/benchtest/adc) — samples ADC1 channel 1 (the
   potentiometer, **PB12**) every 200ms and logs the raw reading via
   `defmt`.
+- [`quadrature`](firmware/benchtest/quadrature) — decodes a 128-step
+  quadrature encoder wired to **PB6**/**PB7** (TIM4_CH1/CH2, overriding
+  this board's own Hall-sensor role for those pins) and logs its position
+  every 100ms via `defmt`.
 
 Each firmware's `main.rs` calls
 [`esc1_discovery::initialize()`](boards/esc1_discovery/board.rs), which
@@ -44,7 +48,7 @@ with the matching flash/RAM sizes, and update the `--chip` value in
 
 ```sh
 cargo build --release          # blinky only (the default member)
-cargo build --release --workspace   # every crate, including both firmware binaries
+cargo build --release --workspace   # every crate, including all firmware binaries
 cargo build --release -p adc   # a specific firmware binary
 ```
 

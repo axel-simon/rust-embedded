@@ -1,9 +1,9 @@
 # peripherals
 
 Hardware-agnostic peripheral abstractions, with a fake backend for
-host-side testing and a real STM32G4 GPIO driver. Has no dependency on
-any external HAL crate; the one real-hardware dependency is
-`stm32-metapac` (target-gated, see below).
+host-side testing and real STM32G4 GPIO, clock, and quadrature-encoder
+drivers. Has no dependency on any external HAL crate; the one
+real-hardware dependency is `stm32-metapac` (target-gated, see below).
 
 ## Layout
 
@@ -157,6 +157,21 @@ any external HAL crate; the one real-hardware dependency is
   channel was already allocated — a channel should only ever be allocated
   once, and the fake catches that bug immediately rather than let two
   roles quietly fight over the same channel.
+- `src/api/quadrature.rs` — device-agnostic quadrature-encoder types:
+  `QuadratureOptions`, `QuadratureTrait` (`position()`), `QuadratureTimer`
+  (which physical timer to decode the encoder with), and
+  `Stm32Ch12InputConfiguration` (which of the timer's two capture channels
+  carries the encoder's A vs B phase).
+- `src/stm32g4/quadrature.rs` — gated to `cfg(target_arch = "arm")`,
+  `Quadrature`, a `QuadratureTrait` driver that configures a chosen timer
+  (`TIM1`/`TIM2`/`TIM3`/`TIM4`/`TIM8` on the STM32G431CB — `TIM5`/`TIM20`
+  exist as `QuadratureTimer` variants for the wider STM32G4 family but
+  aren't physically present on this chip) for hardware encoder-interface
+  mode.
+- `src/fake/quadrature.rs` — likewise, `Quadrature::new()` returns
+  `(Quadrature, FakeQuadrature)`: `Quadrature` for firmware (same API as
+  the real driver), and `FakeQuadrature` for a test to simulate the
+  encoder turning (`move_by()`/`set_encoder_reading()`).
 
 ## Running tests on the host
 
