@@ -6,6 +6,7 @@
 #![cfg_attr(not(test), no_std)]
 
 use common::uptime::Uptime;
+use peripherals::api::dma::{DmaChannel, DmaInstance, DmaRequest, DmaTrait};
 use peripherals::api::gpio::{GpioPin, GpioPort, GpioTrait};
 
 // Motor phase PWM (TIM1): CH1/CH2/CH3 drive the high side (AF6),
@@ -91,8 +92,9 @@ pub const OSCILLATOR_IS_CRYSTAL: bool = true;
 
 /// Number of priority levels this MCU's interrupt controller implements,
 /// as a power-of-two exponent — RTIC needs this to compute its
-/// priority-masking limits (see `src/main.rs`'s `rtic_device` shim, which
-/// re-exports this under the name RTIC's Cortex-M backend looks for).
+/// priority-masking limits (see e.g. `firmware/benchtest/blinky/src/main.rs`'s
+/// `rtic_device` shim, which re-exports this under the name RTIC's
+/// Cortex-M backend looks for).
 /// Named processor-agnostically, rather than after the NVIC (Cortex-M's
 /// interrupt controller) specifically, since this workspace might target a
 /// non-ARM MCU some day. This STM32G431 is a Cortex-M4 part, which — like
@@ -129,16 +131,47 @@ pub type FakeGpio = peripherals::fake::gpio::FakeGpio;
 #[cfg(not(target_arch = "arm"))]
 pub type FakeClockProvider = peripherals::fake::clock::FakeClockProvider;
 
+/// Backend-selected [`peripherals::api::adc::AdcTrait`] driver for
+/// [`BoardPeripherals::adc1`] — see [`initialize`]. Real hardware on
+/// `target_arch = "arm"`, a fake elsewhere (so host-side `cargo test`
+/// works without hardware).
+#[cfg(target_arch = "arm")]
+pub type Adc = peripherals::stm32g4::adc::Adc;
+#[cfg(not(target_arch = "arm"))]
+pub type Adc = peripherals::fake::adc::Adc;
+
+/// See [`FakeGpio`] — the same test-facing counterpart, for
+/// [`BoardPeripherals::adc1`].
+#[cfg(not(target_arch = "arm"))]
+pub type FakeAdc = peripherals::fake::adc::FakeAdc;
+
+/// Backend-selected [`peripherals::api::dma::DmaTrait`] driver for
+/// [`BoardPeripherals::dma`] — see [`initialize`]. Real hardware on
+/// `target_arch = "arm"`, a fake elsewhere (so host-side `cargo test`
+/// works without hardware).
+#[cfg(target_arch = "arm")]
+pub type Dma = peripherals::stm32g4::dma::Dma;
+#[cfg(not(target_arch = "arm"))]
+pub type Dma = peripherals::fake::dma::Dma;
+
+/// See [`FakeGpio`] — the same test-facing counterpart, for
+/// [`BoardPeripherals::dma`].
+#[cfg(not(target_arch = "arm"))]
+pub type FakeDma = peripherals::fake::dma::FakeDma;
+
 /// A test's own handles onto the fake peripherals backing a
 /// [`BoardPeripherals`] returned by [`initialize`] on host/test builds —
 /// the counterpart of [`BoardPeripherals::gpio`]/
-/// [`BoardPeripherals::clock_provider`], which firmware gets instead.
-/// Doesn't exist on real hardware, where there's nothing to fake.
+/// [`BoardPeripherals::clock_provider`]/[`BoardPeripherals::adc1`]/
+/// [`BoardPeripherals::dma`], which firmware gets instead. Doesn't exist
+/// on real hardware, where there's nothing to fake.
 #[cfg(not(target_arch = "arm"))]
 #[derive(Clone)]
 pub struct BoardFakePeripherals {
     pub gpio: FakeGpio,
     pub clock_provider: FakeClockProvider,
+    pub adc1: FakeAdc,
+    pub dma: FakeDma,
 }
 
 /// Everything this board's firmware gets from bringing up the chip: the
@@ -161,14 +194,27 @@ pub struct BoardPeripherals {
     /// [`peripherals::api::clock::ClockProviderTrait::advance_reference_point`]
     /// periodically.
     pub clock_provider: ClockProvider,
+    /// Routes DMA requests to whichever channels [`initialize`] claims —
+    /// currently just ADC1's, for [`Self::adc1`]'s own use during
+    /// [`peripherals::api::adc::AdcTrait::open`]. Pass `&self.dma` (or a
+    /// reference to whichever field ends up holding it) to `open()`.
+    pub dma: Dma,
+    /// ADC1, ready for [`peripherals::api::adc::AdcTrait::open`] — feeds
+    /// [`VBUS_PIN`], the [`BACK_EMF1_PIN`]/[`BACK_EMF3_PIN`] taps,
+    /// [`POTENTIOMETER_PIN`], and others (see Table 12's ADCx_INy
+    /// annotations in the STM32G431 datasheet). [`initialize`] doesn't
+    /// `open()` it itself — calibration only makes sense once a firmware
+    /// picks which channel sequence to convert. Its conversions are
+    /// DMA-driven over [`Self::dma`]'s DMA2 channel 1 (see `initialize`).
+    pub adc1: Adc,
     /// Time elapsed since boot, as of the last time it was refreshed (see
     /// [`peripherals::api::clock::ClockTrait::now`]). Starts at
     /// [`Uptime::epoch`] here; nothing in [`initialize`] refreshes it yet.
     pub uptime: Uptime,
 
     /// A test's own handles onto the same fake [`Self::gpio`]/
-    /// [`Self::clock_provider`] — absent on real hardware. See
-    /// [`BoardFakePeripherals`].
+    /// [`Self::clock_provider`]/[`Self::adc1`]/[`Self::dma`] — absent on
+    /// real hardware. See [`BoardFakePeripherals`].
     #[cfg(not(target_arch = "arm"))]
     pub fakes: BoardFakePeripherals,
 
@@ -209,11 +255,8 @@ pub struct BoardPeripherals {
     pub FDCANRAM1: resources::Peri<'static, resources::peripherals::FDCANRAM1>,
     /// UART behind [`USART2_TX_PIN`]/[`USART2_RX_PIN`].
     pub USART2: resources::Peri<'static, resources::peripherals::USART2>,
-    /// Feeds [`VBUS_PIN`], the [`BACK_EMF1_PIN`]/[`BACK_EMF3_PIN`] taps,
-    /// and others — see Table 12's ADCx_INy annotations in the STM32G431
-    /// datasheet.
-    pub ADC1: resources::Peri<'static, resources::peripherals::ADC1>,
-    /// Feeds [`BACK_EMF2_PIN`] and others.
+    /// Feeds [`BACK_EMF2_PIN`] and others. Claimed but not yet driven by
+    /// any code — see [`BoardPeripherals::adc1`] for ADC1, which is.
     pub ADC2: resources::Peri<'static, resources::peripherals::ADC2>,
     /// Phase U current-sense amplifier ([`CURRENT_FEEDBACK1_OPAMP_P_PIN`]/
     /// [`CURRENT_FEEDBACK1_OPAMP_N_PIN`]/[`OPAMP1_OUT_PIN`]).
@@ -227,7 +270,9 @@ pub struct BoardPeripherals {
 /// Brings up the chip — real hardware via `resources::init()`
 /// (`embassy_stm32::init()` under the hood), or a simulated one on
 /// host/test builds — and `configure()`s every `_PIN` const above on the
-/// resulting [`peripherals::api::gpio::GpioTrait`] driver.
+/// resulting [`peripherals::api::gpio::GpioTrait`] driver. Also constructs
+/// [`BoardPeripherals::adc1`], though without calibrating/`open()`ing it
+/// — see its doc comment.
 ///
 /// Takes a [`resources::RticContext`] (`cortex_m::Peripherals` on real
 /// hardware, `()` on the fake backend — one argument either way) rather
@@ -289,11 +334,15 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
         FDCAN1,
         FDCANRAM1,
         USART2,
-        ADC1,
         ADC2,
         OPAMP1,
         OPAMP2,
         OPAMP3,
+        // DMA2's channel 1, claimed below for ADC1's own DMA request (see
+        // `Dma::claim_channel`) — every other DMA1/DMA2 channel this
+        // board doesn't use falls through to `..` like any other unused
+        // field.
+        DMA2_CH1,
         ..
     } = resources::init(resources::ClockConfiguration {
         mcu_frequency: MCU_FREQUENCY,
@@ -301,7 +350,12 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
         timepiece_is_crystal: OSCILLATOR_IS_CRYSTAL,
     });
     // Every other field of the `Peripherals` above — every peripheral this
-    // board doesn't use at all — is dropped right here.
+    // board doesn't use at all — is dropped right here. That includes
+    // `ADC1`: unlike GPIO, `peripherals::stm32g4::adc::Adc` drives its
+    // register block directly (see `Adc::new` below) rather than through
+    // this `Peri` token, so it's just dropped like any other unused field
+    // — its only purpose would have been to prevent double-claiming
+    // through `embassy_stm32`'s own ADC API, which nothing here uses.
 
     let pins = [
         TIM1_CH1_PIN,
@@ -360,15 +414,51 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
     let (clock_provider, _fake_clock_provider) =
         resources::split_off_fake(ClockProvider::new(&mut cortex_m_peripherals, MCU_FREQUENCY));
 
+    let (mut dma, _fake_dma) = resources::split_off_fake(Dma::new());
+
+    // Claims DMA2's first channel: on real hardware this is just a Rust
+    // move (mirrors `claim_pins!` above); on the fake backend it
+    // additionally registers the channel with the DMA peripheral driver
+    // so that `allocate()` calls for a channel that isn't registered here
+    // trigger warnings. Deliberately DMA2, not DMA1: exercises
+    // `dmamux_channel_index`'s DMA2 branch (RM0440, top of page 420) on
+    // real hardware, not just DMA1's identity mapping.
+    dma.claim_channel(DMA2_CH1);
+
+    // Allocates the now-claimed channel to ADC1's own DMA request line —
+    // see `Adc::open`, which looks this assignment back up via
+    // `DmaTrait::lookup_channel` rather than being told directly.
+    dma.allocate(
+        DmaChannel::new(DmaInstance::Stm32g4Dma2, 1),
+        DmaRequest::Stm32g4DmamuxReqAdc1,
+    );
+
+    // `Adc::new` takes the ADC instance's register block directly (see
+    // `ADC2`'s comment above for why) rather than a `Peri` — real and
+    // fake constructors take a different number of arguments, so this
+    // branches per-cfg rather than sharing one call site the way
+    // `Gpio::new()`/`ClockProvider::new(...)` do.
+    #[cfg(target_arch = "arm")]
+    let (adc1, _fake_adc1) = resources::split_off_fake(Adc::new(
+        stm32_metapac::ADC1,
+        DmaRequest::Stm32g4DmamuxReqAdc1,
+    ));
+    #[cfg(not(target_arch = "arm"))]
+    let (adc1, _fake_adc1) = resources::split_off_fake(Adc::new());
+
     #[cfg(not(target_arch = "arm"))]
     let fakes = BoardFakePeripherals {
         gpio: _fake_gpio,
         clock_provider: _fake_clock_provider,
+        adc1: _fake_adc1,
+        dma: _fake_dma,
     };
 
     BoardPeripherals {
         gpio,
         clock_provider,
+        dma,
+        adc1,
         uptime: Uptime::epoch(),
         #[cfg(not(target_arch = "arm"))]
         fakes,
@@ -385,7 +475,6 @@ pub fn initialize(mut cortex_m_peripherals: resources::RticContext) -> BoardPeri
         FDCAN1,
         FDCANRAM1,
         USART2,
-        ADC1,
         ADC2,
         OPAMP1,
         OPAMP2,

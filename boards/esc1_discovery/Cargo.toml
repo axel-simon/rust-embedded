@@ -22,3 +22,7 @@ resources = { path = "../resources" }
 # `initialize()` below.
 [target.'cfg(target_arch = "arm")'.dependencies]
 cortex-m = "0.7.7"
+# `stm32_metapac::ADC1`, passed into `peripherals::stm32g4::adc::Adc::new()`
+# — see `initialize()` below. Chip variant must match `peripherals`' own
+# `stm32-metapac` feature (see peripherals/Cargo.toml).
+stm32-metapac = { version = "21", features = ["stm32g431cb"] }

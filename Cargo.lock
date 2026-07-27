@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "adc"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt",
+ "esc1_discovery",
+ "peripherals",
+ "rtic",
+ "rtic_shim",
+ "stm32-metapac",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -67,6 +82,21 @@ name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+
+[[package]]
+name = "blinky"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt",
+ "esc1_discovery",
+ "peripherals",
+ "rtic",
+ "rtic_shim",
+ "stm32-metapac",
+]
 
 [[package]]
 name = "block-device-driver"
@@ -447,6 +477,7 @@ dependencies = [
  "cortex-m",
  "peripherals",
  "resources",
+ "stm32-metapac",
 ]
 
 [[package]]
@@ -748,21 +779,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "rtic-stm32g431-led-blink"
-version = "0.1.0"
-dependencies = [
- "common",
- "cortex-m",
- "cortex-m-rt",
- "defmt",
- "esc1_discovery",
- "peripherals",
- "rtic",
- "rtic_shim",
- "stm32-metapac",
 ]
 
 [[package]]

@@ -23,7 +23,9 @@
 
 use core::marker::PhantomData;
 
+use ::peripherals::api::dma::DmaInstance;
 use ::peripherals::api::gpio::GpioPort;
+use ::peripherals::fake::dma::DmaChannelToken;
 use ::peripherals::fake::gpio::PinToken;
 
 /// A minimal, self-contained stand-in for an embassy-X backend's
@@ -55,6 +57,13 @@ impl<'d, T> core::ops::Deref for Peri<'d, T> {
 impl<'d, T: PinToken> PinToken for Peri<'d, T> {
     const PORT: GpioPort = T::PORT;
     const NUMBER: u8 = T::NUMBER;
+}
+
+/// See the `PinToken` impl above — the same, for
+/// `peripherals::fake::dma::Dma::claim_channel` and `DmaChannelToken`.
+impl<'d, T: DmaChannelToken> DmaChannelToken for Peri<'d, T> {
+    const INSTANCE: DmaInstance = T::INSTANCE;
+    const CHANNEL: u8 = T::CHANNEL;
 }
 
 macro_rules! fake_peripherals {
@@ -145,6 +154,29 @@ fake_gpio_pins!(
     PC14 => (PC, 14), PC15 => (PC, 15),
     PF0 => (PF, 0), PF1 => (PF, 1),
     PG10 => (PG, 10),
+);
+
+/// See `fake_gpio_pins!` above — the same, for `DmaChannelToken` and the
+/// 12 DMA channel marker types `fake_peripherals!` generated. Only those
+/// 12 have a meaningful `(instance, channel)` identity — `DMA1`/`DMA2`/
+/// `DMAMUX1` themselves don't, since `Dma::claim_channel` (the only
+/// consumer of this trait) is never called with them.
+macro_rules! fake_dma_channels {
+    ($($name:ident => ($instance:ident, $channel:expr)),+ $(,)?) => {
+        $(
+            impl DmaChannelToken for peripherals::$name {
+                const INSTANCE: DmaInstance = DmaInstance::$instance;
+                const CHANNEL: u8 = $channel;
+            }
+        )+
+    };
+}
+
+fake_dma_channels!(
+    DMA1_CH1 => (Stm32g4Dma1, 1), DMA1_CH2 => (Stm32g4Dma1, 2), DMA1_CH3 => (Stm32g4Dma1, 3),
+    DMA1_CH4 => (Stm32g4Dma1, 4), DMA1_CH5 => (Stm32g4Dma1, 5), DMA1_CH6 => (Stm32g4Dma1, 6),
+    DMA2_CH1 => (Stm32g4Dma2, 1), DMA2_CH2 => (Stm32g4Dma2, 2), DMA2_CH3 => (Stm32g4Dma2, 3),
+    DMA2_CH4 => (Stm32g4Dma2, 4), DMA2_CH5 => (Stm32g4Dma2, 5), DMA2_CH6 => (Stm32g4Dma2, 6),
 );
 
 // See boards/resources/resources.rs for tests — they exercise this module
