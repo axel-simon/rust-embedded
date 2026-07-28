@@ -36,6 +36,12 @@ impl MathCoprocessor {
     }
 }
 
+impl Default for MathCoprocessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MathCoprocessorTrait for MathCoprocessor {
     fn compute(&mut self, function: MathCoprocessorFunction) {
         let r = stm32_metapac::CORDIC;

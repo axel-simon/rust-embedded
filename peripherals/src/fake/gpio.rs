@@ -276,7 +276,7 @@ mod tests {
     fn starts_up_analog_and_low() {
         let (_gpio, fake) = Gpio::new();
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::None);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
         gpio.claim_pin(TestPin);
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::Up);
         gpio.configure(p);
-        assert_eq!(fake.get(p), true);
+        assert!(fake.get(p));
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod tests {
         // Reconfiguring with a pull-down should now force it back low.
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::Down);
         gpio.configure(p);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -321,9 +321,9 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::Output, GpioPull::None);
         gpio.configure(p);
         gpio.set(p, true);
-        assert_eq!(fake.get(p), true);
+        assert!(fake.get(p));
         gpio.set(p, false);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::InvertedOutput, GpioPull::None);
         gpio.configure(p);
         gpio.set(p, true);
-        assert_eq!(fake.get(p), true);
+        assert!(fake.get(p));
     }
 
     #[test]
@@ -343,7 +343,7 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::Analog, GpioPull::None);
         gpio.configure(p);
         gpio.set(p, true);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::AlternateMode, GpioPull::None);
         gpio.configure(p);
         gpio.set(p, true);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -367,7 +367,7 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::None);
         gpio.configure(p);
         gpio.set(p, true);
-        assert_eq!(fake.get(p), false);
+        assert!(!fake.get(p));
     }
 
     #[test]
@@ -389,6 +389,6 @@ mod tests {
         let p = pin(GpioPort::PC, 6, GpioMode::Input, GpioPull::None);
         gpio.configure(p);
         fake.set(p, true);
-        assert_eq!(fake.get(p), true);
+        assert!(fake.get(p));
     }
 }

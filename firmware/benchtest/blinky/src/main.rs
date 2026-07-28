@@ -166,7 +166,7 @@ mod tests {
         firmware.step();
         // Each `step()` is a full on/off cycle, so the LED is off again by
         // the time it returns.
-        assert_eq!(fakes.gpio.get(esc1_discovery::STATUS_PIN), false);
+        assert!(!fakes.gpio.get(esc1_discovery::STATUS_PIN));
         let after_first_blink = fakes.clock_provider.now();
 
         firmware.step();

@@ -87,7 +87,7 @@ fn clock_config(
                     return None;
                 }
                 let numerator = vco * m as u64;
-                if numerator % oscillator_frequency_u64 != 0 {
+                if !numerator.is_multiple_of(oscillator_frequency_u64) {
                     return None;
                 }
                 let n = numerator / oscillator_frequency_u64;

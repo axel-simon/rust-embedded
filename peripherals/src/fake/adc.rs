@@ -22,7 +22,7 @@ use crate::api::dma::{DmaRequest, DmaTrait};
 /// treats the full 16 bits as significant.
 const FAKE_SAMPLE_BITS: u32 = 16;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct AdcState {
     /// `None` while closed. The fake reads/writes samples straight into
     /// this `AdcOptions`' own [`crate::api::adc::AdcSampleBuffer`] — the
@@ -33,15 +33,6 @@ struct AdcState {
     /// call that observes it set — see [`AdcTrait::conversion_done`]'s
     /// "exactly once" contract.
     conversion_pending: bool,
-}
-
-impl Default for AdcState {
-    fn default() -> Self {
-        AdcState {
-            options: None,
-            conversion_pending: false,
-        }
-    }
 }
 
 /// The simulated ADC state shared between an [`Adc`] and its [`FakeAdc`]

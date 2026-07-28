@@ -43,6 +43,12 @@ impl Gpio {
     pub fn claim_pin<T>(&mut self, _pin: T) {}
 }
 
+impl Default for Gpio {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GpioTrait for Gpio {
     fn configure(&mut self, pin: GpioPin) {
         let n = pin.pin_number() as usize;
