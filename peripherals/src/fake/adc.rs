@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use common::unit_interval::UnitInterval;
 
-use crate::api::adc::{AdcOptions, AdcTrait, MAX_ADC_SEQUENCE_LENGTH};
-use crate::api::dma::DmaTrait;
+use crate::api::adc::{AdcInstance, AdcOptions, AdcTrait, MAX_ADC_SEQUENCE_LENGTH};
+use crate::api::dma::{DmaRequest, DmaTrait};
 
 /// Bit width the fake treats a raw stored sample as spanning — the shared
 /// `AdcSampleBuffer` holds raw `u16` counts (matching what a real driver's
@@ -66,8 +66,13 @@ pub struct FakeAdc(Rc<SharedState>);
 
 impl Adc {
     /// Creates a fake ADC, closed, with no sample values set, and a
-    /// [`FakeAdc`] handle onto the same simulated state.
-    pub fn new() -> (Self, FakeAdc) {
+    /// [`FakeAdc`] handle onto the same simulated state. `_instance`/
+    /// `_dma_request` are accepted and ignored — there's no real ADC
+    /// instance or DMA request line to select here — purely to mirror
+    /// [`crate::stm32g4::adc::Adc::new`]'s signature, the same way
+    /// [`crate::fake::quadrature::Quadrature::new`]'s `_timer` parameter
+    /// mirrors its own real counterpart.
+    pub fn new(_instance: AdcInstance, _dma_request: DmaRequest) -> (Self, FakeAdc) {
         let state = Rc::new(SharedState(Cell::new(AdcState::default())));
         (Adc(state.clone()), FakeAdc(state))
     }
@@ -214,14 +219,14 @@ mod tests {
 
     #[test]
     fn starts_closed_with_no_options() {
-        let (_adc, fake) = Adc::new();
+        let (_adc, fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         assert!(!fake.is_open());
         assert_eq!(fake.options(), None);
     }
 
     #[test]
     fn open_records_options_and_marks_open() {
-        let (mut adc, fake) = Adc::new();
+        let (mut adc, fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         let options = AdcOptions::new(&[4], buffer());
         adc.open(options, &unused_dma());
         assert!(fake.is_open());
@@ -230,7 +235,7 @@ mod tests {
 
     #[test]
     fn close_marks_closed() {
-        let (mut adc, fake) = Adc::new();
+        let (mut adc, fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.open(AdcOptions::new(&[4], buffer()), &unused_dma());
         adc.close();
         assert!(!fake.is_open());
@@ -239,13 +244,13 @@ mod tests {
 
     #[test]
     fn conversion_done_is_false_before_any_trigger() {
-        let (adc, _fake) = Adc::new();
+        let (adc, _fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         assert!(!adc.conversion_done());
     }
 
     #[test]
     fn conversion_done_returns_true_exactly_once_per_trigger() {
-        let (mut adc, _fake) = Adc::new();
+        let (mut adc, _fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.open(AdcOptions::new(&[4], buffer()), &unused_dma());
         adc.trigger();
         assert!(adc.conversion_done());
@@ -256,14 +261,14 @@ mod tests {
 
     #[test]
     fn trigger_while_closed_does_not_arm_a_conversion() {
-        let (adc, _fake) = Adc::new();
+        let (adc, _fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.trigger();
         assert!(!adc.conversion_done());
     }
 
     #[test]
     fn get_sample_reads_back_a_value_set_via_fake() {
-        let (mut adc, fake) = Adc::new();
+        let (mut adc, fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.open(AdcOptions::new(&[4, 7], buffer()), &unused_dma());
         fake.set_sample(1, sample(2345));
         adc.trigger();
@@ -273,14 +278,14 @@ mod tests {
 
     #[test]
     fn get_sample_defaults_to_zero() {
-        let (mut adc, _fake) = Adc::new();
+        let (mut adc, _fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.open(AdcOptions::new(&[4], buffer()), &unused_dma());
         assert_eq!(adc.get_sample(0), UnitInterval::default());
     }
 
     #[test]
     fn get_sample_outside_the_configured_sequence_warns_and_returns_zero() {
-        let (mut adc, fake) = Adc::new();
+        let (mut adc, fake) = Adc::new(AdcInstance::Stm32g4Adc1, DmaRequest::Stm32g4DmamuxReqAdc1);
         adc.open(AdcOptions::new(&[4], buffer()), &unused_dma());
         fake.set_sample(1, sample(999));
         assert_eq!(adc.get_sample(1), UnitInterval::default());

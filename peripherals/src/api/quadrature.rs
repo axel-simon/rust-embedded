@@ -6,25 +6,8 @@ use common::unit_interval::UnitInterval;
 
 /// A timer instance capable of decoding a quadrature encoder in hardware.
 ///
-/// All variants are prefixed by the chip family they belong to, since a
-/// timer name like `TIM1` isn't unique across families. For STM32G4,
-/// [`Stm32g4Tim1`](Self::Stm32g4Tim1), [`Stm32g4Tim3`](Self::Stm32g4Tim3),
-/// [`Stm32g4Tim4`](Self::Stm32g4Tim4), [`Stm32g4Tim5`](Self::Stm32g4Tim5),
-/// [`Stm32g4Tim8`](Self::Stm32g4Tim8), and
-/// [`Stm32g4Tim20`](Self::Stm32g4Tim20) all have this ability; the LPTIM
-/// peripherals do not and have no variant here. `TIM2` (the STM32G4 family's
-/// only 32-bit general-purpose timer — every other encoder-capable timer is
-/// 16-bit) has no variant either: the real STM32G4 backend never supports
-/// it at all, so a `Stm32g4Tim2` variant could never actually be
-/// constructed by it — see [`crate::stm32g4::quadrature`]'s doc comment for
-/// why that restriction buys real code simplicity. Not every remaining
-/// variant exists as a physical timer on every chip in the family (e.g.
-/// the STM32G431 this workspace targets by default has neither `TIM5` nor
-/// `TIM20`); [`Self::Stm32g4Tim5`]/[`Self::Stm32g4Tim20`] additionally need
-/// `peripherals` to be built with one of its chip features that actually
-/// has them (e.g. `stm32g474re`, not the default `stm32g431cb` — see
-/// `peripherals/Cargo.toml`) before the real backend will claim them — see
-/// [`crate::stm32g4::quadrature`]'s doc comment for both.
+/// For simplicity, the `Stm32g4Tim2` peripheral is not supported here, as it
+/// is a 32-bit timer that requires more complex handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum QuadratureTimer {

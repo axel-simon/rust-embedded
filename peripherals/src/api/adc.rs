@@ -7,6 +7,16 @@ use common::unit_interval::UnitInterval;
 
 use crate::api::dma::DmaTrait;
 
+/// Every ADC instance across all supported MCUs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdcInstance {
+    Stm32g4Adc1,
+    Stm32g4Adc2,
+    Stm32g4Adc3,
+    Stm32g4Adc4,
+    Stm32g4Adc5,
+}
+
 /// Maximum number of ADC channels [`AdcOptions`] can hold — the length of
 /// the sequence a single [`AdcTrait::trigger`] call converts — and the
 /// fixed capacity of every [`AdcSampleBuffer`].

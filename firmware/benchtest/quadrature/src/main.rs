@@ -3,29 +3,22 @@
 
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
-use esc1_discovery::{BoardPeripherals, ClockProvider};
+use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
-use peripherals::api::quadrature::{
-    QuadratureInputConfiguration, QuadratureOptions, QuadratureTimer, QuadratureTrait,
-};
-
-/// Backend-selected [`QuadratureTrait`] driver — real hardware on
-/// `target_arch = "arm"`, a fake elsewhere (so host-side `cargo test`
-/// works without hardware). Local to this firmware (unlike
-/// `esc1_discovery::Gpio`/`ClockProvider`/`Adc`, which live in the board
-/// crate): `encoder_counts`/[`INPUT_CONFIGURATION`] are this benchtest's
-/// own choices, not a fixed board fact the way e.g. ADC1's existence is —
-/// see `esc1_discovery::TIM4_CH1_PIN`/`TIM4_CH2_PIN`/`TIM4_CH3_PIN` for the
-/// pin routing itself, which *does* live in the board crate.
+use peripherals::api::quadrature::{QuadratureInputConfiguration, QuadratureOptions, QuadratureTrait};
+// `esc1_discovery` no longer re-exports its own backend-selected
+// `ClockProvider`/`Quadrature` (it names its driver types as
+// `backend::clock::ClockProvider`/`backend::quadrature::Quadrature`
+// internally now) — this firmware still needs its own copy of the same
+// cfg'd selection to name [`BoardPeripherals::quadrature`]'s/
+// [`BoardPeripherals::clock_provider`]'s concrete type in `Firmware` below.
 #[cfg(target_arch = "arm")]
-type Quadrature = peripherals::stm32g4::quadrature::Quadrature;
+use peripherals::stm32g4::{clock::ClockProvider, quadrature::Quadrature};
 #[cfg(not(target_arch = "arm"))]
-type Quadrature = peripherals::fake::quadrature::Quadrature;
-#[cfg(not(target_arch = "arm"))]
-type FakeQuadrature = peripherals::fake::quadrature::FakeQuadrature;
+use peripherals::fake::{clock::ClockProvider, quadrature::Quadrature};
 
-/// Channel 1 (`esc1_discovery::TIM4_CH1_PIN`, PB6) carries input A,
-/// channel 2 (`esc1_discovery::TIM4_CH2_PIN`, PB7) carries input B — no
+/// Channel 1 (`esc1_discovery::TIM4_QUADRATURE_A`, PB6) carries input A,
+/// channel 2 (`esc1_discovery::TIM4_QUADRATURE_B`, PB7) carries input B — no
 /// swap needed.
 const INPUT_CONFIGURATION: QuadratureInputConfiguration =
     QuadratureInputConfiguration::Ch12AreInputsAB;
@@ -43,23 +36,20 @@ const SAMPLE_PERIOD: Duration = Duration::from_millis(100);
 struct Firmware {
     quadrature: Quadrature,
     clock_provider: ClockProvider,
-    #[cfg(not(target_arch = "arm"))]
-    fake_quadrature: FakeQuadrature,
 }
 
 impl Firmware {
     fn new(peripherals: BoardPeripherals) -> Self {
-        let BoardPeripherals { clock_provider, .. } = peripherals;
+        let BoardPeripherals {
+            mut quadrature,
+            clock_provider,
+            ..
+        } = peripherals;
 
         // `esc1_discovery::initialize` (called by `init` below, before
-        // this runs) already configured PB6/PB7/PB8 as TIM4's channel
-        // inputs — see `esc1_discovery::TIM4_CH1_PIN`/`TIM4_CH2_PIN`/
-        // `TIM4_CH3_PIN`.
-        #[cfg(target_arch = "arm")]
-        let mut quadrature = Quadrature::new(QuadratureTimer::Stm32g4Tim4);
-        #[cfg(not(target_arch = "arm"))]
-        let (mut quadrature, fake_quadrature) = Quadrature::new(QuadratureTimer::Stm32g4Tim4);
-
+        // this runs) already claimed TIM4 and constructed `quadrature` —
+        // see `BoardPeripherals::quadrature`'s doc comment for why it's
+        // this firmware, not the board crate, that `open()`s it.
         quadrature.open(QuadratureOptions {
             input_configuration: INPUT_CONFIGURATION,
             encoder_counts: ENCODER_COUNTS,
@@ -68,8 +58,6 @@ impl Firmware {
         Firmware {
             quadrature,
             clock_provider,
-            #[cfg(not(target_arch = "arm"))]
-            fake_quadrature,
         }
     }
 
@@ -133,8 +121,6 @@ mod app {
         pub(crate) firmware: Firmware,
         #[cfg(not(target_arch = "arm"))]
         pub(crate) fakes: esc1_discovery::BoardFakePeripherals,
-        #[cfg(not(target_arch = "arm"))]
-        pub(crate) fake_quadrature: super::FakeQuadrature,
     }
 
     #[init]
@@ -154,13 +140,6 @@ mod app {
         let fakes = peripherals.fakes.clone(); // cheap: Rc-backed
 
         let firmware = Firmware::new(peripherals);
-        // Cheap: `Rc`-backed, same as `fakes` above — cloned out of
-        // `firmware` (rather than out of `peripherals` like `fakes` is)
-        // since it's `Firmware::new` itself that constructs the
-        // `Quadrature`/`FakeQuadrature` pair (see `Quadrature`'s doc
-        // comment on why it isn't part of `BoardPeripherals`).
-        #[cfg(not(target_arch = "arm"))]
-        let fake_quadrature = firmware.fake_quadrature.clone();
 
         (
             Shared {},
@@ -168,8 +147,6 @@ mod app {
                 firmware,
                 #[cfg(not(target_arch = "arm"))]
                 fakes,
-                #[cfg(not(target_arch = "arm"))]
-                fake_quadrature,
             },
         )
     }
@@ -200,10 +177,10 @@ mod tests {
     #[test]
     fn step_reflects_the_fake_encoders_reading() {
         let (_shared, local) = app::init(app::init::Context);
-        let mut fake_quadrature = local.fake_quadrature.clone(); // cheap: Rc-backed
+        let mut fakes = local.fakes.clone(); // cheap: Rc-backed
         let mut firmware = local.firmware;
 
-        fake_quadrature.set_encoder_reading(64); // halfway around 128 steps
+        fakes.quadrature.set_encoder_reading(64); // halfway around 128 steps
         let position = firmware.step();
         assert_eq!(f32::from(position), 0.5);
     }

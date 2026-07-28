@@ -7,7 +7,7 @@
 
 use common::unit_interval::UnitInterval;
 
-use crate::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait};
+use crate::api::adc::{AdcInstance, AdcOptions, AdcSampleBuffer, AdcTrait};
 use crate::api::dma::{DmaRequest, DmaTrait};
 use crate::stm32g4::dma;
 use stm32_metapac::adc::vals as adc_vals;
@@ -62,24 +62,33 @@ pub struct Adc {
 }
 
 impl Adc {
-    /// Wraps the ADC instance behind `regs` (e.g. `stm32_metapac::ADC1`),
-    /// identified to [`AdcTrait::open`] as `dma_request` (e.g.
+    /// Wraps the ADC instance named by `instance` (e.g.
+    /// [`AdcInstance::Stm32g4Adc1`] for `ADC1`), identified to
+    /// [`AdcTrait::open`] as `dma_request` (e.g.
     /// [`DmaRequest::Stm32g4DmamuxReqAdc1`] for `ADC1`) — see
-    /// [`validate_dma_request`]. Enables the ADC12 clock domain shared by
-    /// `ADC1`/`ADC2` and selects its clock source (see
+    /// [`validate_dma_request`]. Resolved to its concrete
+    /// `stm32_metapac::adc::Adc` register block here, eagerly — unlike
+    /// [`crate::stm32g4::quadrature::Quadrature::new`]'s deferred-to-`open()`
+    /// resolution: an `instance` unsupported under `peripherals`'s current
+    /// chip feature (see [`adc_registers`]) is treated as a construction-time
+    /// programming error here, not a non-panicking `open()`-time failure —
+    /// consistent with [`validate_dma_request`] already panicking in this
+    /// same function for a bad `dma_request`. Enables the ADC12 clock domain
+    /// shared by `ADC1`/`ADC2` and selects its clock source (see
     /// [`enable_adc_clock`]), so register access through the returned
     /// driver isn't silently ineffective; does not calibrate or enable the
     /// ADC itself — see [`AdcTrait::open`].
     ///
     /// # Panics
-    /// Panics if `dma_request` isn't
-    /// [`Stm32g4DmamuxReqAdc1`](DmaRequest::Stm32g4DmamuxReqAdc1) or
-    /// [`Stm32g4DmamuxReqAdc2`](DmaRequest::Stm32g4DmamuxReqAdc2).
-    pub fn new(regs: stm32_metapac::adc::Adc, dma_request: DmaRequest) -> Self {
+    /// Panics if `dma_request` isn't one of `ADC1`-`ADC5`'s own DMAMUX
+    /// request lines (see [`validate_dma_request`]), or if `instance` names
+    /// an ADC not available under `peripherals`'s currently active chip
+    /// feature (see [`adc_registers`]).
+    pub fn new(instance: AdcInstance, dma_request: DmaRequest) -> Self {
         validate_dma_request(dma_request);
         enable_adc_clock();
         Adc {
-            regs,
+            regs: adc_registers(instance),
             dma_request,
             dma_channel: None,
             sequence_length: 0,
@@ -263,16 +272,75 @@ fn clear_transfer_flags(dma_channel: crate::api::dma::DmaChannel) {
     });
 }
 
-/// Checks that `dma_request` is one of `ADC1`'s/`ADC2`'s own DMAMUX
-/// request lines — the only two [`Adc::new`] accepts.
+/// Checks that `dma_request` is one of `ADC1`-`ADC5`'s own DMAMUX request
+/// lines — the only ones [`Adc::new`] accepts.
 ///
 /// # Panics
 /// Panics if `dma_request` is anything else.
 fn validate_dma_request(dma_request: DmaRequest) {
     match dma_request {
-        DmaRequest::Stm32g4DmamuxReqAdc1 | DmaRequest::Stm32g4DmamuxReqAdc2 => {}
+        DmaRequest::Stm32g4DmamuxReqAdc1
+        | DmaRequest::Stm32g4DmamuxReqAdc2
+        | DmaRequest::Stm32g4DmamuxReqAdc3
+        | DmaRequest::Stm32g4DmamuxReqAdc4
+        | DmaRequest::Stm32g4DmamuxReqAdc5 => {}
         other => {
-            panic!("stm32g4::adc::Adc::new was given {other:?}, not an ADC1/ADC2 DMA request line")
+            panic!("stm32g4::adc::Adc::new was given {other:?}, not an ADC1-ADC5 DMA request line")
+        }
+    }
+}
+
+/// The real `ADCx` register-block handle for `instance` — see [`Adc::new`]'s
+/// doc comment for why this is resolved eagerly rather than deferred like
+/// `crate::stm32g4::quadrature::timer_block`. `Stm32g4Adc3`/`Adc4`/`Adc5`
+/// mirror `timer_block`'s `Stm32g4Tim5`/`Stm32g4Tim20` handling of a chip
+/// feature that doesn't have them (`stm32_metapac::ADC3`/`ADC4`/`ADC5`
+/// don't exist as identifiers at all outside `stm32g474re`) — but panic
+/// instead of returning `None`, since [`Adc::new`] resolves eagerly rather
+/// than deferring to `open()`.
+///
+/// # Panics
+/// Panics if `instance` names an ADC not available under `peripherals`'s
+/// currently active chip feature.
+fn adc_registers(instance: AdcInstance) -> stm32_metapac::adc::Adc {
+    match instance {
+        AdcInstance::Stm32g4Adc1 => stm32_metapac::ADC1,
+        AdcInstance::Stm32g4Adc2 => stm32_metapac::ADC2,
+        AdcInstance::Stm32g4Adc3 => {
+            #[cfg(feature = "stm32g474re")]
+            {
+                stm32_metapac::ADC3
+            }
+            #[cfg(not(feature = "stm32g474re"))]
+            {
+                panic!(
+                    "Stm32g4Adc3 needs peripherals' stm32g474re feature (see peripherals/Cargo.toml) — not available on the default stm32g431cb"
+                )
+            }
+        }
+        AdcInstance::Stm32g4Adc4 => {
+            #[cfg(feature = "stm32g474re")]
+            {
+                stm32_metapac::ADC4
+            }
+            #[cfg(not(feature = "stm32g474re"))]
+            {
+                panic!(
+                    "Stm32g4Adc4 needs peripherals' stm32g474re feature (see peripherals/Cargo.toml) — not available on the default stm32g431cb"
+                )
+            }
+        }
+        AdcInstance::Stm32g4Adc5 => {
+            #[cfg(feature = "stm32g474re")]
+            {
+                stm32_metapac::ADC5
+            }
+            #[cfg(not(feature = "stm32g474re"))]
+            {
+                panic!(
+                    "Stm32g4Adc5 needs peripherals' stm32g474re feature (see peripherals/Cargo.toml) — not available on the default stm32g431cb"
+                )
+            }
         }
     }
 }

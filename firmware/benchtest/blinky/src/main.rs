@@ -2,9 +2,18 @@
 #![cfg_attr(not(test), no_main)]
 
 use common::duration::Duration;
-use esc1_discovery::{BoardPeripherals, ClockProvider, Gpio};
+use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::gpio::GpioTrait;
+// `esc1_discovery` no longer re-exports its own backend-selected
+// `Gpio`/`ClockProvider` (it names its driver types as
+// `backend::gpio::Gpio`/`backend::clock::ClockProvider` internally now) —
+// this firmware still needs its own copy of the same cfg'd selection to
+// store one in `Firmware` below.
+#[cfg(target_arch = "arm")]
+use peripherals::stm32g4::{clock::ClockProvider, gpio::Gpio};
+#[cfg(not(target_arch = "arm"))]
+use peripherals::fake::{clock::ClockProvider, gpio::Gpio};
 
 // `#[rtic_shim::app]` generates its own entry point on real hardware (see
 // the `app` module below), replacing the usual `#[cortex_m_rt::entry]`.

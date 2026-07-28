@@ -25,7 +25,7 @@ peripherals = { path = "../../peripherals" }
 # handles timekeeping instead), so there's no reason to give up a timer for
 # it.
 embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "rt"] }
-# `RticContext` (see stm32g4.rs).
+# `McuInterface` (see stm32g4.rs).
 cortex-m = "0.7.7"
 # Registers the RTT logging backend `defmt::info!` (called from
 # src/main.rs) dispatches through, and the `#[panic_handler]` — see

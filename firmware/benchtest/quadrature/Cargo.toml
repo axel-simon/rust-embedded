@@ -11,6 +11,9 @@ license = "MIT OR Apache-2.0"
 # .cargo/config.toml too if you target a different G431 package/flash size.
 esc1_discovery = { path = "../../../boards/esc1_discovery" }
 peripherals = { path = "../../../peripherals" }
+# `resources::claim_quadrature_timer`, for turning `BoardPeripherals::TIM4`
+# into a `peripherals::api::quadrature::QuadratureTimer` — see src/main.rs.
+resources = { path = "../../../boards/resources" }
 # `Duration`, for the sampling loop's `wait_for` delay in src/main.rs.
 common = { path = "../../../common" }
 # `#[rtic_shim::app]` — real RTIC on real hardware, a host-only fake

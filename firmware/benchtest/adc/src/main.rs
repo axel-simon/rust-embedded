@@ -3,9 +3,18 @@
 
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
-use esc1_discovery::{Adc, BoardPeripherals, ClockProvider};
+use esc1_discovery::BoardPeripherals;
 use peripherals::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait};
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
+// `esc1_discovery` no longer re-exports its own backend-selected
+// `Adc`/`ClockProvider` (it names its driver types as
+// `backend::adc::Adc`/`backend::clock::ClockProvider` internally now) —
+// this firmware still needs its own copy of the same cfg'd selection to
+// store one in `Firmware` below.
+#[cfg(target_arch = "arm")]
+use peripherals::stm32g4::{adc::Adc, clock::ClockProvider};
+#[cfg(not(target_arch = "arm"))]
+use peripherals::fake::{adc::Adc, clock::ClockProvider};
 
 /// ADC1's channel wired to the B-G431B-ESC1's potentiometer
 /// (`esc1_discovery::POTENTIOMETER_PIN`, PB12) — PB12 is ADC1_IN11, per the

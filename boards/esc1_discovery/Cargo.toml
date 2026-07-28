@@ -11,8 +11,6 @@ path = "board.rs"
 
 [dependencies]
 peripherals = { path = "../../peripherals" }
-# Uptime — see BoardPeripherals::uptime below.
-common = { path = "../../common" }
 # Backend-selected Peripherals/Peri aliases + init() — see
 # boards/resources/resources.rs. Plain (not target-gated): resources
 # handles its own arm/non-arm branching internally.
@@ -22,7 +20,3 @@ resources = { path = "../resources" }
 # `initialize()` below.
 [target.'cfg(target_arch = "arm")'.dependencies]
 cortex-m = "0.7.7"
-# `stm32_metapac::ADC1`, passed into `peripherals::stm32g4::adc::Adc::new()`
-# — see `initialize()` below. Chip variant must match `peripherals`' own
-# `stm32-metapac` feature (see peripherals/Cargo.toml).
-stm32-metapac = { version = "21", features = ["stm32g431cb"] }
