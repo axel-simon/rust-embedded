@@ -23,10 +23,20 @@
 
 use core::marker::PhantomData;
 
+// Leading `::` on every import below is load-bearing, not just style: this
+// file's own `fake_peripherals!` macro (further down) defines a `pub mod
+// peripherals`, which would otherwise shadow the extern crate `peripherals`
+// these imports need — rustfmt is aware `::foo` and `foo` are usually
+// equivalent and will "simplify" away the leading `::` if asked to
+// reformat this block, so don't run it over this file.
+use ::peripherals::api::adc::AdcInstance;
 use ::peripherals::api::dma::DmaInstance;
 use ::peripherals::api::gpio::GpioPort;
+use ::peripherals::api::quadrature::QuadratureTimer;
 use ::peripherals::fake::dma::DmaChannelToken;
 use ::peripherals::fake::gpio::PinToken;
+
+use crate::{AdcCapableInstance, QuadratureCapableTimer};
 
 /// A minimal, self-contained stand-in for an embassy-X backend's
 /// `Peri<'d, T>` (e.g. `embassy_stm32::Peri<'d, T>`): just enough shape (a
@@ -99,29 +109,143 @@ macro_rules! fake_peripherals {
 
 fake_peripherals!(
     // GPIO pins (42)
-    PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9, PA10, PA11, PA12, PA13, PA14, PA15,
-    PB0, PB1, PB2, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB10, PB11, PB12, PB13, PB14, PB15,
-    PC4, PC6, PC10, PC11, PC13, PC14, PC15,
-    PF0, PF1,
+    PA0,
+    PA1,
+    PA2,
+    PA3,
+    PA4,
+    PA5,
+    PA6,
+    PA7,
+    PA8,
+    PA9,
+    PA10,
+    PA11,
+    PA12,
+    PA13,
+    PA14,
+    PA15,
+    PB0,
+    PB1,
+    PB2,
+    PB3,
+    PB4,
+    PB5,
+    PB6,
+    PB7,
+    PB8,
+    PB9,
+    PB10,
+    PB11,
+    PB12,
+    PB13,
+    PB14,
+    PB15,
+    PC4,
+    PC6,
+    PC10,
+    PC11,
+    PC13,
+    PC14,
+    PC15,
+    PF0,
+    PF1,
     PG10,
     // Analog (14)
-    ADC1, ADC12_COMMON, ADC2, COMP1, COMP2, COMP3, COMP4, DAC1, DAC3,
-    OPAMP1, OPAMP2, OPAMP3, VREFBUF, VREFINTCAL,
+    ADC1,
+    ADC12_COMMON,
+    ADC2,
+    COMP1,
+    COMP2,
+    COMP3,
+    COMP4,
+    DAC1,
+    DAC3,
+    OPAMP1,
+    OPAMP2,
+    OPAMP3,
+    VREFBUF,
+    VREFINTCAL,
     // Timers (10)
-    TIM1, TIM15, TIM16, TIM17, TIM2, TIM3, TIM4, TIM6, TIM7, TIM8,
+    TIM1,
+    TIM15,
+    TIM16,
+    TIM17,
+    TIM2,
+    TIM3,
+    TIM4,
+    TIM6,
+    TIM7,
+    TIM8,
     // DMA (3 controller/mux blocks + 12 channels)
-    DMA1, DMA2, DMAMUX1,
-    DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6,
-    DMA2_CH1, DMA2_CH2, DMA2_CH3, DMA2_CH4, DMA2_CH5, DMA2_CH6,
+    DMA1,
+    DMA2,
+    DMAMUX1,
+    DMA1_CH1,
+    DMA1_CH2,
+    DMA1_CH3,
+    DMA1_CH4,
+    DMA1_CH5,
+    DMA1_CH6,
+    DMA2_CH1,
+    DMA2_CH2,
+    DMA2_CH3,
+    DMA2_CH4,
+    DMA2_CH5,
+    DMA2_CH6,
     // Communication (15)
-    I2C1, I2C2, I2C3, SPI1, SPI2, SPI3, USART1, USART2, USART3, UART4,
-    LPUART1, USB, FDCAN1, FDCANRAM1, UCPD1,
+    I2C1,
+    I2C2,
+    I2C3,
+    SPI1,
+    SPI2,
+    SPI3,
+    USART1,
+    USART2,
+    USART3,
+    UART4,
+    LPUART1,
+    USB,
+    FDCAN1,
+    FDCANRAM1,
+    UCPD1,
     // EXTI lines (16)
-    EXTI0, EXTI1, EXTI2, EXTI3, EXTI4, EXTI5, EXTI6, EXTI7,
-    EXTI8, EXTI9, EXTI10, EXTI11, EXTI12, EXTI13, EXTI14, EXTI15,
+    EXTI0,
+    EXTI1,
+    EXTI2,
+    EXTI3,
+    EXTI4,
+    EXTI5,
+    EXTI6,
+    EXTI7,
+    EXTI8,
+    EXTI9,
+    EXTI10,
+    EXTI11,
+    EXTI12,
+    EXTI13,
+    EXTI14,
+    EXTI15,
     // Misc / system (19)
-    CORDIC, CRC, CRS, DBGMCU, FLASH, FMAC, IWDG, LPTIM1, PWR, MCO,
-    RCC, RNG, RTC, SAI1, SYSCFG, TAMP, UID, USBRAM, WWDG,
+    CORDIC,
+    CRC,
+    CRS,
+    DBGMCU,
+    FLASH,
+    FMAC,
+    IWDG,
+    LPTIM1,
+    PWR,
+    MCO,
+    RCC,
+    RNG,
+    RTC,
+    SAI1,
+    SYSCFG,
+    TAMP,
+    UID,
+    USBRAM,
+    WWDG,
 );
 
 /// Implements `PinToken` for a batch of the GPIO marker types
@@ -177,6 +301,44 @@ fake_dma_channels!(
     DMA1_CH4 => (Stm32g4Dma1, 4), DMA1_CH5 => (Stm32g4Dma1, 5), DMA1_CH6 => (Stm32g4Dma1, 6),
     DMA2_CH1 => (Stm32g4Dma2, 1), DMA2_CH2 => (Stm32g4Dma2, 2), DMA2_CH3 => (Stm32g4Dma2, 3),
     DMA2_CH4 => (Stm32g4Dma2, 4), DMA2_CH5 => (Stm32g4Dma2, 5), DMA2_CH6 => (Stm32g4Dma2, 6),
+);
+
+/// See `fake_gpio_pins!`/`fake_dma_channels!` above — the same, for
+/// `crate::QuadratureCapableTimer` and the timer marker types
+/// `fake_peripherals!` generated. Matches `stm32g4.rs`'s real-hardware
+/// impls exactly (see its comment for why `TIM5`/`TIM20`/`TIM2` are
+/// absent here too).
+macro_rules! fake_quadrature_timers {
+    ($($name:ident => $variant:ident),+ $(,)?) => {
+        $(
+            impl QuadratureCapableTimer for peripherals::$name {
+                const TIMER: QuadratureTimer = QuadratureTimer::$variant;
+            }
+        )+
+    };
+}
+
+fake_quadrature_timers!(
+    TIM1 => Stm32g4Tim1, TIM3 => Stm32g4Tim3, TIM4 => Stm32g4Tim4, TIM8 => Stm32g4Tim8,
+);
+
+/// See `fake_gpio_pins!`/`fake_dma_channels!`/`fake_quadrature_timers!`
+/// above — the same, for `crate::AdcCapableInstance` and the ADC marker
+/// types `fake_peripherals!` generated. Matches `stm32g4.rs`'s
+/// real-hardware impls exactly (see its comment for why `ADC3`/`ADC4`/
+/// `ADC5` are absent here too).
+macro_rules! fake_adc_instances {
+    ($($name:ident => $variant:ident),+ $(,)?) => {
+        $(
+            impl AdcCapableInstance for peripherals::$name {
+                const INSTANCE: AdcInstance = AdcInstance::$variant;
+            }
+        )+
+    };
+}
+
+fake_adc_instances!(
+    ADC1 => Stm32g4Adc1, ADC2 => Stm32g4Adc2,
 );
 
 // See boards/resources/resources.rs for tests — they exercise this module

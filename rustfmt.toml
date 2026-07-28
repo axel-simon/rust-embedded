@@ -1,4 +1,10 @@
 # Rustfmt configuration
+# Every crate in this workspace is edition 2021; `cargo fmt` already detects
+# that per-crate, but plain `rustfmt some/file.rs` (e.g. editor format-on-save)
+# doesn't read Cargo.toml and defaults to edition 2015 unless told otherwise.
+# Setting it here (rustfmt.toml's own `edition` key) makes rustfmt pick it up
+# automatically either way, instead of everyone needing `--edition 2021`.
+edition = "2021"
 # Format comments to not extend beyond column 79
 unstable_features = true
 comment_width = 79

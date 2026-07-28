@@ -14,10 +14,10 @@ pub type Peripherals = fake_embassy::Peripherals;
 pub type Peri<'d, T> = fake_embassy::Peri<'d, T>;
 pub use fake_embassy::peripherals;
 
-/// See `stm32g4::RticContext`'s doc comment — there's no real
+/// See `stm32g4::McuInterface`'s doc comment — there's no real
 /// `cortex_m::Peripherals` to hand a board's `initialize()` here, so it's
 /// just unit.
-pub type RticContext = ();
+pub type McuInterface = ();
 
 /// Brings up a simulated chip and hands back ownership of every
 /// peripheral singleton. Ignores `_clock_configuration` — there's no real
@@ -31,6 +31,26 @@ pub fn init(_clock_configuration: ClockConfiguration) -> Peripherals {
 /// `(value, fake_handle)`, so this is just the identity function.
 pub fn split_off_fake<T, Fake>(pair: (T, Fake)) -> (T, Fake) {
     pair
+}
+
+/// See `stm32g4::claim_quadrature_timer`'s doc comment for why this is
+/// defined separately per backend. The fake `Peri` (unlike the real
+/// `embassy_stm32::Peri`) has no extra trait bound on `T` at all, so this
+/// only needs `T: QuadratureCapableTimer`.
+pub fn claim_quadrature_timer<T: crate::QuadratureCapableTimer>(
+    _timer: Peri<'static, T>,
+) -> ::peripherals::api::quadrature::QuadratureTimer {
+    T::TIMER
+}
+
+/// See `stm32g4::claim_adc`'s doc comment for why this is defined
+/// separately per backend. The fake `Peri` (unlike the real
+/// `embassy_stm32::Peri`) has no extra trait bound on `T` at all, so this
+/// only needs `T: AdcCapableInstance`.
+pub fn claim_adc<T: crate::AdcCapableInstance>(
+    _adc: Peri<'static, T>,
+) -> ::peripherals::api::adc::AdcInstance {
+    T::INSTANCE
 }
 
 #[cfg(test)]
@@ -53,6 +73,10 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn claim_pins_registers_the_fake_pin_via_pin_token() {
+        // Leading `::` load-bearing here, not style — see fake_embassy.rs's
+        // top-of-file comment: `use super::*;` above pulls this module's
+        // own re-exported `peripherals` (the marker-type module) into
+        // scope, shadowing the extern crate of the same name.
         use ::peripherals::api::gpio::{GpioPin, GpioPort};
         use ::peripherals::fake::gpio::Gpio;
 

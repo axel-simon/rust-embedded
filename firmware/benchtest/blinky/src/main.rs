@@ -2,9 +2,18 @@
 #![cfg_attr(not(test), no_main)]
 
 use common::duration::Duration;
-use esc1_discovery::{BoardPeripherals, ClockProvider, Gpio};
+use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::gpio::GpioTrait;
+// `esc1_discovery` no longer re-exports its own backend-selected
+// `Gpio`/`ClockProvider` (it names its driver types as
+// `backend::gpio::Gpio`/`backend::clock::ClockProvider` internally now) —
+// this firmware still needs its own copy of the same cfg'd selection to
+// store one in `Firmware` below.
+#[cfg(not(target_arch = "arm"))]
+use peripherals::fake::{clock::ClockProvider, gpio::Gpio};
+#[cfg(target_arch = "arm")]
+use peripherals::stm32g4::{clock::ClockProvider, gpio::Gpio};
 
 // `#[rtic_shim::app]` generates its own entry point on real hardware (see
 // the `app` module below), replacing the usual `#[cortex_m_rt::entry]`.
@@ -75,9 +84,9 @@ impl Firmware {
 mod rtic_device {
     // `allow`: nothing here needs `Interrupt`/register-block re-exports
     // until a real interrupt-bound task exists; kept for when one does.
+    pub use esc1_discovery::RTIC_PRIORITY_BITS as NVIC_PRIO_BITS;
     #[allow(unused_imports)]
     pub use stm32_metapac::*;
-    pub use esc1_discovery::RTIC_PRIORITY_BITS as NVIC_PRIO_BITS;
 }
 
 /// The application's RTIC task graph — real RTIC on real hardware, or (via
@@ -157,7 +166,7 @@ mod tests {
         firmware.step();
         // Each `step()` is a full on/off cycle, so the LED is off again by
         // the time it returns.
-        assert_eq!(fakes.gpio.get(esc1_discovery::STATUS_PIN), false);
+        assert!(!fakes.gpio.get(esc1_discovery::STATUS_PIN));
         let after_first_blink = fakes.clock_provider.now();
 
         firmware.step();

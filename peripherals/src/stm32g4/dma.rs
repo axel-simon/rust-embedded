@@ -65,6 +65,12 @@ impl Dma {
     pub fn claim_channel<T>(&mut self, _peri: T) {}
 }
 
+impl Default for Dma {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DmaTrait for Dma {
     fn allocate(&mut self, channel: DmaChannel, request: DmaRequest) {
         let index = dmamux_channel_index(channel);

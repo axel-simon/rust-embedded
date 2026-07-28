@@ -8,12 +8,7 @@
 //! to match. Actually configuring or starting a transfer on a channel is done
 //! within specific peripheral drivers that need DMA transfers.
 
-/// Every DMA controller instance this workspace knows about, across every
-/// chip family it's ever targeted. Grows the same way [`DmaRequest`] does:
-/// additive only, one variant per instance, named `<Family><Instance>`
-/// (e.g. [`Self::Stm32g4Dma1`]/[`Self::Stm32g4Dma2`] for the STM32G4's
-/// `DMA1`/`DMA2`) — a concrete [`DmaTrait`] driver only ever recognizes
-/// its own family's variants.
+/// DMA controller instances of each supported MCU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DmaInstance {
     Stm32g4Dma1,

@@ -2,7 +2,7 @@
 //! aliases, and the STM32G4-specific PLL configuration [`init`] computes
 //! from a board's [`crate::ClockConfiguration`].
 
-use crate::ClockConfiguration;
+use crate::{AdcCapableInstance, ClockConfiguration, QuadratureCapableTimer};
 
 // Neither is referenced by name — `defmt-rtt` registers the RTT logging
 // backend `defmt::info!` calls dispatch through, and `panic-probe` registers
@@ -16,9 +16,10 @@ pub type Peripherals = embassy_stm32::Peripherals;
 pub type Peri<'d, T> = embassy_stm32::Peri<'d, T>;
 pub use embassy_stm32::peripherals;
 
-// RTIC requires access to the CPU. On STM32, this is provided by Cortex-M
-// crate.
-pub type RticContext = cortex_m::Peripherals;
+// The core MCU interface a board hands to whatever's driving it (RTIC, on
+// this workspace's real hardware) — on STM32, this is Cortex-M's own core
+// peripherals.
+pub type McuInterface = cortex_m::Peripherals;
 
 /// Brings up the chip and hands back ownership of every peripheral
 /// singleton.
@@ -86,7 +87,7 @@ fn clock_config(
                     return None;
                 }
                 let numerator = vco * m as u64;
-                if numerator % oscillator_frequency_u64 != 0 {
+                if !numerator.is_multiple_of(oscillator_frequency_u64) {
                     return None;
                 }
                 let n = numerator / oscillator_frequency_u64;
@@ -137,4 +138,80 @@ fn clock_config(
 /// unconditionally.
 pub fn split_off_fake<T>(value: T) -> (T, ()) {
     (value, ())
+}
+
+/// Claims `timer` (consuming its `Peri` ownership token — the same
+/// ownership enforcement `peripherals::claim_pins!`/`Dma::claim_channel`
+/// give GPIO pins/DMA channels) and resolves which
+/// [`peripherals::api::quadrature::QuadratureTimer`](::peripherals::api::quadrature::QuadratureTimer)
+/// it names, ready to pass to
+/// `peripherals::stm32g4::quadrature::Quadrature::new`. `T:
+/// QuadratureCapableTimer` is what makes passing an incompatible timer
+/// resource a compile error — see that trait's doc comment. Defined here
+/// (rather than once, backend-agnostically, in resources.rs) for the same
+/// reason [`split_off_fake`] is: `Peri<'static, T>` (the real
+/// `embassy_stm32::Peri`) additionally requires `T:
+/// embassy_stm32::PeripheralType`, a bound the fake `Peri` has no
+/// equivalent of at all — see `fake.rs`'s own `claim_quadrature_timer`.
+pub fn claim_quadrature_timer<T: QuadratureCapableTimer + embassy_stm32::PeripheralType>(
+    _timer: Peri<'static, T>,
+) -> ::peripherals::api::quadrature::QuadratureTimer {
+    T::TIMER
+}
+
+// `QuadratureCapableTimer` impls for the real STM32G4 timer instances
+// `peripherals::stm32g4::quadrature` actually supports (see its doc
+// comment) — matches `QuadratureTimer`'s own variant list, minus
+// `Stm32g4Tim5`/`Stm32g4Tim20` (not physically present as
+// `embassy_stm32::peripherals` types on the `stm32g431cb` chip feature
+// this crate currently targets — see resources/Cargo.toml) and
+// `Stm32g4Tim2` (never supported at all).
+impl QuadratureCapableTimer for embassy_stm32::peripherals::TIM1 {
+    const TIMER: ::peripherals::api::quadrature::QuadratureTimer =
+        ::peripherals::api::quadrature::QuadratureTimer::Stm32g4Tim1;
+}
+impl QuadratureCapableTimer for embassy_stm32::peripherals::TIM3 {
+    const TIMER: ::peripherals::api::quadrature::QuadratureTimer =
+        ::peripherals::api::quadrature::QuadratureTimer::Stm32g4Tim3;
+}
+impl QuadratureCapableTimer for embassy_stm32::peripherals::TIM4 {
+    const TIMER: ::peripherals::api::quadrature::QuadratureTimer =
+        ::peripherals::api::quadrature::QuadratureTimer::Stm32g4Tim4;
+}
+impl QuadratureCapableTimer for embassy_stm32::peripherals::TIM8 {
+    const TIMER: ::peripherals::api::quadrature::QuadratureTimer =
+        ::peripherals::api::quadrature::QuadratureTimer::Stm32g4Tim8;
+}
+
+/// Claims `adc` (consuming its `Peri` ownership token — the same ownership
+/// enforcement `peripherals::claim_pins!`/`Dma::claim_channel` give GPIO
+/// pins/DMA channels) and resolves which
+/// [`peripherals::api::adc::AdcInstance`](::peripherals::api::adc::AdcInstance)
+/// it names, ready to pass to `peripherals::stm32g4::adc::Adc::new`. `T:
+/// AdcCapableInstance` is what makes passing an unsupported ADC resource a
+/// compile error — see that trait's doc comment. Defined here (rather than
+/// once, backend-agnostically, in resources.rs) for the same reason
+/// [`claim_quadrature_timer`] is: `Peri<'static, T>` (the real
+/// `embassy_stm32::Peri`) additionally requires `T:
+/// embassy_stm32::PeripheralType`, a bound the fake `Peri` has no
+/// equivalent of at all — see `fake.rs`'s own `claim_adc`.
+pub fn claim_adc<T: AdcCapableInstance + embassy_stm32::PeripheralType>(
+    _adc: Peri<'static, T>,
+) -> ::peripherals::api::adc::AdcInstance {
+    T::INSTANCE
+}
+
+// `AdcCapableInstance` impls for the real STM32G4 ADC instances
+// `peripherals::stm32g4::adc` actually supports on this crate's
+// `stm32g431cb` embassy-stm32 feature (see resources/Cargo.toml) —
+// `ADC3`/`ADC4`/`ADC5` aren't generated as `embassy_stm32::peripherals`
+// types at all on this chip, the same reason `QuadratureCapableTimer` has
+// no `TIM5`/`TIM20` impls above.
+impl AdcCapableInstance for embassy_stm32::peripherals::ADC1 {
+    const INSTANCE: ::peripherals::api::adc::AdcInstance =
+        ::peripherals::api::adc::AdcInstance::Stm32g4Adc1;
+}
+impl AdcCapableInstance for embassy_stm32::peripherals::ADC2 {
+    const INSTANCE: ::peripherals::api::adc::AdcInstance =
+        ::peripherals::api::adc::AdcInstance::Stm32g4Adc2;
 }
