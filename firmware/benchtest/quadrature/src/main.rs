@@ -5,17 +5,19 @@ use common::duration::Duration;
 use common::unit_interval::UnitInterval;
 use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
-use peripherals::api::quadrature::{QuadratureInputConfiguration, QuadratureOptions, QuadratureTrait};
+use peripherals::api::quadrature::{
+    QuadratureInputConfiguration, QuadratureOptions, QuadratureTrait,
+};
 // `esc1_discovery` no longer re-exports its own backend-selected
 // `ClockProvider`/`Quadrature` (it names its driver types as
 // `backend::clock::ClockProvider`/`backend::quadrature::Quadrature`
 // internally now) — this firmware still needs its own copy of the same
 // cfg'd selection to name [`BoardPeripherals::quadrature`]'s/
 // [`BoardPeripherals::clock_provider`]'s concrete type in `Firmware` below.
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{clock::ClockProvider, quadrature::Quadrature};
 #[cfg(not(target_arch = "arm"))]
 use peripherals::fake::{clock::ClockProvider, quadrature::Quadrature};
+#[cfg(target_arch = "arm")]
+use peripherals::stm32g4::{clock::ClockProvider, quadrature::Quadrature};
 
 /// Channel 1 (`esc1_discovery::TIM4_QUADRATURE_A`, PB6) carries input A,
 /// channel 2 (`esc1_discovery::TIM4_QUADRATURE_B`, PB7) carries input B — no

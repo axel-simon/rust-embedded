@@ -11,10 +11,10 @@ use peripherals::api::math_coprocessor::{MathCoprocessorFunction, MathCoprocesso
 // `backend::clock::ClockProvider`/`backend::math_coprocessor::MathCoprocessor`
 // internally now) — this firmware still needs its own copy of the same
 // cfg'd selection to store one in `Firmware` below.
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
 #[cfg(not(target_arch = "arm"))]
 use peripherals::fake::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
+#[cfg(target_arch = "arm")]
+use peripherals::stm32g4::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
 
 /// How often to compute one sine/cosine pair and print its difference
 /// from the reference implementation.

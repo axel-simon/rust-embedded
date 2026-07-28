@@ -29,7 +29,8 @@ fn expand(module: ItemMod) -> TokenStream2 {
         content,
         ..
     } = module;
-    let (_brace, items) = content.expect("rtic_fake::app requires `mod app { ... }`, not `mod app;`");
+    let (_brace, items) =
+        content.expect("rtic_fake::app requires `mod app { ... }`, not `mod app;`");
     let items = items.into_iter().map(expand_item);
 
     quote! {
@@ -43,7 +44,8 @@ fn expand(module: ItemMod) -> TokenStream2 {
 fn expand_item(item: Item) -> TokenStream2 {
     match item {
         Item::Struct(item_struct)
-            if has_marker(&item_struct.attrs, "shared") || has_marker(&item_struct.attrs, "local") =>
+            if has_marker(&item_struct.attrs, "shared")
+                || has_marker(&item_struct.attrs, "local") =>
         {
             expand_resources_struct(item_struct)
         }
