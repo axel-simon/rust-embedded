@@ -489,6 +489,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 name = "esc1_discovery"
 version = "0.1.0"
 dependencies = [
+ "common",
  "cortex-m",
  "peripherals",
  "resources",
@@ -673,6 +674,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pwm"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt",
+ "esc1_discovery",
+ "peripherals",
+ "rtic",
+ "rtic_shim",
+ "stm32-metapac",
 ]
 
 [[package]]

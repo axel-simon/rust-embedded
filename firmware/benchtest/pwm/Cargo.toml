@@ -1,0 +1,41 @@
+[package]
+name = "pwm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Chip variant is STM32G431CB (B-G431B-ESC1 Discovery kit). Update the
+# probe-rs chip name in .cargo/config.toml too if you target a different
+# G431 package/flash size.
+esc1_discovery = { path = "../../../boards/esc1_discovery" }
+peripherals = { path = "../../../peripherals" }
+# `Duration`, for the sampling loop's `wait_for` delay in src/main.rs, and
+# the PWM dead-time constant.
+common = { path = "../../../common" }
+# `#[rtic_shim::app]` — real RTIC on real hardware, a host-only fake
+# elsewhere, so `src/main.rs` builds and unit-tests either way.
+rtic_shim = { path = "../../../macros/rtic_shim" }
+
+# Firmware-only: `rtic_shim::app`'s real-RTIC path and its defmt logging
+# are only meaningful targeting the actual chip, so `cargo test --target
+# <host-triple>` never needs any of these.
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+# Still needed even with RTIC back: `#[rtic::app]` generates its own `main`
+# but relies on cortex-m-rt's `Reset` handler/vector table/`link.x`.
+cortex-m-rt = "0.7.5"
+# `rtic_shim::app` forwards to this crate's own `#[rtic::app]`, but the
+# code it generates references `rtic::export::*` directly in whichever
+# crate the attribute is invoked from — so this crate needs `rtic` as a
+# direct dependency too, not just transitively.
+rtic = { version = "2.3.0", features = ["thumbv7-backend"] }
+
+# `defmt::info!(...)` is called directly from src/main.rs, so this crate
+# needs `defmt` itself — but not a registered RTT logging backend or panic
+# handler, which this crate never sets up.
+defmt = "1.1.1"
+# `stm32-metapac` doesn't generate a `NVIC_PRIO_BITS` const the way an
+# svd2rust PAC does (`#[rtic::app]`'s `device` argument expects one) — see
+# the `rtic_device` shim module in src/main.rs, which supplies it.
+stm32-metapac = { version = "21", features = ["stm32g431cb"] }

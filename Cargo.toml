@@ -11,6 +11,7 @@ members = [
     "firmware/benchtest/adc",
     "firmware/benchtest/cordic",
     "firmware/benchtest/quadrature",
+    "firmware/benchtest/pwm",
 ]
 # `cargo build`/`cargo run` without `-p` operate on this member only, so the
 # existing "just run it" workflow (see README.md) keeps working now that

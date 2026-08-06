@@ -5,6 +5,7 @@
 //! pinout for motor control" in UM2516 (the kit's user manual).
 #![cfg_attr(not(test), no_std)]
 
+use common::duration::Duration;
 use peripherals::api::dma::{DmaChannel, DmaInstance, DmaRequest, DmaTrait};
 use peripherals::api::gpio::{GpioPin, GpioPort, GpioTrait};
 // Real hardware on `target_arch = "arm"`, a fake elsewhere (so host-side
@@ -57,15 +58,12 @@ pub const CAN_TX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 9, 9).with_high
 pub const CAN_TERM_PIN: GpioPin = GpioPin::output(GpioPort::PC, 14);
 pub const CAN_SHUTDOWN_PIN: GpioPin = GpioPin::inverted_output(GpioPort::PC, 11);
 
-// UART2 (AF7): TX for telemetry, RX for firmware update, both on J3.
+// UART2 (AF7): On J3.
 pub const USART2_TX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 3, 7);
 pub const USART2_RX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 4, 7);
 
 // External PWM input for motor speed regulation (J3); inferred as TIM2_CH1
-// (AF1) since UM2516 only names it generically as "PWM". Only the pin mux
-// is set up here — no capture logic exists yet, and TIM2 itself isn't
-// claimed by anything (see resources/Cargo.toml — no `time-driver-*`
-// feature), so it's free for an actual input-capture implementation.
+// (AF1) since UM2516 only names it generically as "PWM".
 pub const PWM_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 15, 1).with_pull_down();
 
 // Battery/potentiometer/NTC analog sense lines.
@@ -105,12 +103,16 @@ pub const OSCILLATOR_IS_CRYSTAL: bool = true;
 /// priority-masking limits.
 pub const RTIC_PRIORITY_BITS: u8 = 4; // Valid for all ST Cortex-M4 MCUs.
 
+/// TIM1's dead time — the switch-off/switch-on gap enforced between each
+/// PWM channel's complementary pair (e.g. [`TIM1_CH1_PIN`]/
+/// [`TIM1_CH1N_PIN`]). Measured by hand at 28V bus voltage with no load.
+pub const TIM1_DEAD_TIME: Duration = Duration::from_nanos(230);
+
 /// A test's own handles onto the fake peripherals backing a
 /// [`BoardPeripherals`] returned by [`initialize`] on host/test builds —
 /// the counterpart of [`BoardPeripherals::gpio`]/
 /// [`BoardPeripherals::clock_provider`]/[`BoardPeripherals::adc1`]/
-/// [`BoardPeripherals::dma`], which firmware gets instead. Doesn't exist
-/// on real hardware, where there's nothing to fake.
+/// [`BoardPeripherals::dma`]/..., which firmware gets instead.
 #[cfg(not(target_arch = "arm"))]
 #[derive(Clone)]
 pub struct BoardFakePeripherals {
@@ -119,19 +121,11 @@ pub struct BoardFakePeripherals {
     pub adc1: backend::adc::FakeAdc,
     pub dma: backend::dma::FakeDma,
     pub quadrature: backend::quadrature::FakeQuadrature,
+    pub pwm1: backend::pwm::FakePwm,
 }
 
-/// Everything this board's firmware gets from bringing up the chip: the
-/// GPIO driver (already `configure()`d for every `_PIN` const above), and
-/// ownership of every pin/peripheral this board's schematic uses that
-/// doesn't have a dedicated `GpioPin` role.
-///
-/// `backend::gpio::Gpio`'s underlying type, and the presence of
-/// [`Self::fakes`], are the only things that differ between real hardware
-/// and host/test builds — see [`initialize`]. The remaining fields keep the
-/// same upper-case names they have on `resources::Peripherals` (and, on
-/// real hardware, `embassy_stm32::Peripherals`) since they're moved out of
-/// it verbatim.
+/// Drivers relevant to this board and Embassy peripheral resources that do not
+/// have high-level drivers yet.
 #[allow(non_snake_case)]
 pub struct BoardPeripherals {
     pub gpio: backend::gpio::Gpio,
@@ -139,11 +133,12 @@ pub struct BoardPeripherals {
     pub dma: backend::dma::Dma,
     pub adc1: backend::adc::Adc,
     pub quadrature: backend::quadrature::Quadrature,
+    pub pwm1: backend::pwm::Pwm,
     pub math_coprocessor: backend::math_coprocessor::MathCoprocessor,
 
     /// A test's own handles onto the same fake [`Self::gpio`]/
     /// [`Self::clock_provider`]/[`Self::adc1`]/[`Self::dma`]/
-    /// [`Self::quadrature`] — absent on real hardware. See
+    /// [`Self::quadrature`]/[`Self::pwm1`] — absent on real hardware. See
     /// [`BoardFakePeripherals`].
     #[cfg(not(target_arch = "arm"))]
     pub fakes: BoardFakePeripherals,
@@ -170,9 +165,6 @@ pub struct BoardPeripherals {
     /// Dedicated NRST pin (shared pad with PG10).
     pub PG10: resources::Peri<'static, resources::peripherals::PG10>,
 
-    /// Motor phase PWM generator driving [`TIM1_CH1_PIN`] and friends.
-    /// Claimed but not yet driven by any code.
-    pub TIM1: resources::Peri<'static, resources::peripherals::TIM1>,
     /// CAN controller behind [`CAN_RX_PIN`]/[`CAN_TX_PIN`].
     pub FDCAN1: resources::Peri<'static, resources::peripherals::FDCAN1>,
     /// Message RAM for [`Self::FDCAN1`].
@@ -191,9 +183,9 @@ pub struct BoardPeripherals {
     pub OPAMP3: resources::Peri<'static, resources::peripherals::OPAMP3>,
 }
 
-/// Brings up the chip — real hardware via `resources::init()`
-/// (`embassy_stm32::init()` under the hood), or a simulated one on
-/// host/test builds.
+/// Initializes the MCU and its peripherals by calling `resources::init()`
+/// (which calls `embassy_stm32::init()` under the hood if compiled for real
+/// hardware).
 ///
 /// Takes a [`resources::McuInterface`] (`cortex_m::Peripherals` on real
 /// hardware, `()` on the fake backend) and returns it as part of
@@ -315,7 +307,7 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
     // `Peri` bound above is dropped, so it can't also be claimed through
     // `embassy_stm32`'s own pin API elsewhere); on the fake backend it
     // additionally registers each pin with the gpio peripheral driver so that
-    // pins that are used but not registered here trigger warnings.
+    // pins that are later used but not registered here trigger warnings.
     peripherals::claim_pins!(
         gpio, PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9, PA10, PA11, PA12, PA15, PB0, PB1,
         PB2, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB11, PB12, PB14, PB15, PC4, PC6, PC10, PC11, PC13,
@@ -351,6 +343,14 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
     let (quadrature, _fake_quadrature) =
         resources::split_off_fake(backend::quadrature::Quadrature::new(quadrature_timer));
 
+    // Claim TIM1 and construct a pwm::Pwm driver from it. TIM1 sits on
+    // APB2, which — like every other bus this board's PLL config (see
+    // MCU_FREQUENCY) leaves at its default DIV1 prescaler — runs at
+    // MCU_FREQUENCY with no further timer-clock multiplier.
+    let pwm_timer = resources::claim_pwm_timer(TIM1);
+    let (pwm1, _fake_pwm1) =
+        resources::split_off_fake(backend::pwm::Pwm::new(pwm_timer, MCU_FREQUENCY));
+
     // No `split_off_fake`: the math coprocessor has no fake counterpart.
     let math_coprocessor = backend::math_coprocessor::MathCoprocessor::new();
 
@@ -361,6 +361,7 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         adc1: _fake_adc1,
         dma: _fake_dma,
         quadrature: _fake_quadrature,
+        pwm1: _fake_pwm1,
     };
 
     BoardPeripherals {
@@ -369,6 +370,7 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         dma,
         adc1,
         quadrature,
+        pwm1,
         math_coprocessor,
         #[cfg(not(target_arch = "arm"))]
         fakes,
@@ -381,7 +383,6 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         PF0,
         PF1,
         PG10,
-        TIM1,
         FDCAN1,
         FDCANRAM1,
         USART2,
