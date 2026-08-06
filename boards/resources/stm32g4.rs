@@ -2,7 +2,7 @@
 //! aliases, and the STM32G4-specific PLL configuration [`init`] computes
 //! from a board's [`crate::ClockConfiguration`].
 
-use crate::{AdcCapableInstance, ClockConfiguration, QuadratureCapableTimer};
+use crate::{AdcCapableInstance, ClockConfiguration, PwmCapableTimer, QuadratureCapableTimer};
 
 // Neither is referenced by name — `defmt-rtt` registers the RTT logging
 // backend `defmt::info!` calls dispatch through, and `panic-probe` registers
@@ -214,4 +214,27 @@ impl AdcCapableInstance for embassy_stm32::peripherals::ADC1 {
 impl AdcCapableInstance for embassy_stm32::peripherals::ADC2 {
     const INSTANCE: ::peripherals::api::adc::AdcInstance =
         ::peripherals::api::adc::AdcInstance::Stm32g4Adc2;
+}
+
+/// Claims `timer` and resolves which
+/// [`peripherals::api::pwm::PwmTimer`](::peripherals::api::pwm::PwmTimer)
+/// it names, ready to pass to this workspace's real PWM driver's
+/// constructor — see [`claim_quadrature_timer`]'s doc comment for why
+/// this is defined here, per backend.
+pub fn claim_pwm_timer<T: PwmCapableTimer + embassy_stm32::PeripheralType>(
+    _timer: Peri<'static, T>,
+) -> ::peripherals::api::pwm::PwmTimer {
+    T::TIMER
+}
+
+// `PwmCapableTimer` impls for the real STM32G4 timer instances this
+// workspace's PWM driver actually supports — `TIM20` is absent for the
+// same reason it's absent from `QuadratureCapableTimer` above: not
+// physically present on the `stm32g431cb` chip feature this crate
+// currently targets.
+impl PwmCapableTimer for embassy_stm32::peripherals::TIM1 {
+    const TIMER: ::peripherals::api::pwm::PwmTimer = ::peripherals::api::pwm::PwmTimer::Stm32g4Tim1;
+}
+impl PwmCapableTimer for embassy_stm32::peripherals::TIM8 {
+    const TIMER: ::peripherals::api::pwm::PwmTimer = ::peripherals::api::pwm::PwmTimer::Stm32g4Tim8;
 }

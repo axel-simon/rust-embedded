@@ -15,6 +15,8 @@ peripherals = { path = "../../peripherals" }
 # boards/resources/resources.rs. Plain (not target-gated): resources
 # handles its own arm/non-arm branching internally.
 resources = { path = "../resources" }
+# `Duration`, for the `TIM1_DEAD_TIME` board-fact constant below.
+common = { path = "../../common" }
 
 # `cortex_m::Peripherals::take()`, passed into `ClockProvider::new()` — see
 # `initialize()` below.

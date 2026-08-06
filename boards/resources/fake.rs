@@ -53,6 +53,17 @@ pub fn claim_adc<T: crate::AdcCapableInstance>(
     T::INSTANCE
 }
 
+/// This fake `Peri` needs no extra trait bound on `T` (unlike the real
+/// backend's `embassy_stm32::Peri`, which additionally requires `T:
+/// embassy_stm32::PeripheralType`), so this is defined separately here
+/// with just the `T: PwmCapableTimer` bound, rather than once,
+/// backend-agnostically.
+pub fn claim_pwm_timer<T: crate::PwmCapableTimer>(
+    _timer: Peri<'static, T>,
+) -> ::peripherals::api::pwm::PwmTimer {
+    T::TIMER
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

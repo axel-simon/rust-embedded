@@ -32,11 +32,12 @@ use core::marker::PhantomData;
 use ::peripherals::api::adc::AdcInstance;
 use ::peripherals::api::dma::DmaInstance;
 use ::peripherals::api::gpio::GpioPort;
+use ::peripherals::api::pwm::PwmTimer;
 use ::peripherals::api::quadrature::QuadratureTimer;
 use ::peripherals::fake::dma::DmaChannelToken;
 use ::peripherals::fake::gpio::PinToken;
 
-use crate::{AdcCapableInstance, QuadratureCapableTimer};
+use crate::{AdcCapableInstance, PwmCapableTimer, QuadratureCapableTimer};
 
 /// A minimal, self-contained stand-in for an embassy-X backend's
 /// `Peri<'d, T>` (e.g. `embassy_stm32::Peri<'d, T>`): just enough shape (a
@@ -339,6 +340,25 @@ macro_rules! fake_adc_instances {
 
 fake_adc_instances!(
     ADC1 => Stm32g4Adc1, ADC2 => Stm32g4Adc2,
+);
+
+/// See `fake_gpio_pins!`/`fake_dma_channels!`/`fake_quadrature_timers!`/
+/// `fake_adc_instances!` above — the same, for `crate::PwmCapableTimer` and
+/// the timer marker types `fake_peripherals!` generated. `TIM20` is absent
+/// here too since it isn't physically present on the `stm32g431cb` chip
+/// feature this crate currently targets.
+macro_rules! fake_pwm_timers {
+    ($($name:ident => $variant:ident),+ $(,)?) => {
+        $(
+            impl PwmCapableTimer for peripherals::$name {
+                const TIMER: PwmTimer = PwmTimer::$variant;
+            }
+        )+
+    };
+}
+
+fake_pwm_timers!(
+    TIM1 => Stm32g4Tim1, TIM8 => Stm32g4Tim8,
 );
 
 // See boards/resources/resources.rs for tests — they exercise this module

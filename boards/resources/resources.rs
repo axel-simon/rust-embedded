@@ -84,3 +84,13 @@ pub trait QuadratureCapableTimer {
 pub trait AdcCapableInstance {
     const INSTANCE: ::peripherals::api::adc::AdcInstance;
 }
+
+/// Marks a `peripherals::TIMx` marker type as naming a timer instance that
+/// can generate this workspace's kind of PWM. Implemented below, per
+/// backend, only for the specific timers this workspace's PWM driver
+/// supports, so the per-backend `claim_pwm_timer` function rejects an
+/// incompatible timer at compile time rather than at runtime — same
+/// reasoning, and same per-backend split, as [`QuadratureCapableTimer`].
+pub trait PwmCapableTimer {
+    const TIMER: ::peripherals::api::pwm::PwmTimer;
+}
