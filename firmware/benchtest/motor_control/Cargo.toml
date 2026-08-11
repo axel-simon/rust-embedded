@@ -1,0 +1,44 @@
+[package]
+name = "motor_control"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Chip variant is STM32G431CB (B-G431B-ESC1 Discovery kit); see
+# boards/esc1_discovery for the pin map (incl. the current-sense op-amp
+# bring-up this app depends on) and boards/resources/Cargo.toml for the
+# embassy-stm32 chip feature. Update the probe-rs chip name in
+# .cargo/config.toml too if you target a different G431 package/flash size.
+esc1_discovery = { path = "../../../boards/esc1_discovery" }
+peripherals = { path = "../../../peripherals" }
+# `Duration`/`SymmetricUnitInterval`, used throughout src/.
+common = { path = "../../../common" }
+# `#[rtic_shim::app]` — real RTIC on real hardware, a host-only fake
+# elsewhere, so `src/main.rs` builds and unit-tests either way.
+rtic_shim = { path = "../../../macros/rtic_shim" }
+
+# Firmware-only: `rtic_shim::app`'s real-RTIC path and its defmt logging
+# are only meaningful targeting the actual chip, so `cargo test --target
+# <host-triple>` (see peripherals/README.md) never needs any of these.
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+# Still needed even with RTIC back: `#[rtic::app]` generates its own `main`
+# but relies on cortex-m-rt's `Reset` handler/vector table/`link.x`.
+cortex-m-rt = "0.7.5"
+# `rtic_shim::app` forwards to this crate's own `#[rtic::app]` (see
+# macros/rtic_shim), but the code it generates references `rtic::export::*`
+# directly in whichever crate the attribute is invoked from — so this crate
+# needs `rtic` as a direct dependency too, not just transitively.
+rtic = { version = "2.3.0", features = ["thumbv7-backend"] }
+
+# `defmt::info!(...)` is called directly from src/main.rs, so this crate
+# needs `defmt` itself — but its RTT logging backend/panic handler don't:
+# see boards/resources/Cargo.toml, which owns `defmt-rtt`/`panic-probe`.
+defmt = "1.1.1"
+# `stm32-metapac` doesn't generate a `NVIC_PRIO_BITS` const the way an
+# svd2rust PAC does (`#[rtic::app]`'s `device` argument expects one) — see
+# the `rtic_device` shim module in src/main.rs, which supplies it. Its own
+# `Interrupt::ADC1_2` variant is also what `#[task(binds = ADC1_2, ...)]`
+# resolves against.
+stm32-metapac = { version = "21", features = ["stm32g431cb"] }

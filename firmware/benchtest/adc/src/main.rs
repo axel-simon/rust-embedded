@@ -3,18 +3,15 @@
 
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
+// `backend::x::Y` resolves to `peripherals::stm32g4::x::Y` on real
+// hardware or `peripherals::fake::x::Y` elsewhere — see
+// `esc1_discovery::backend`'s own doc comment. Used below for the
+// backend-selected driver types stored in `Firmware`, instead of
+// repeating the `#[cfg(target_arch = "arm")]` branch here too.
+use esc1_discovery::backend::{adc::Adc, clock::ClockProvider};
 use esc1_discovery::BoardPeripherals;
-use peripherals::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait};
+use peripherals::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait, AdcTriggerSource};
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
-// `esc1_discovery` no longer re-exports its own backend-selected
-// `Adc`/`ClockProvider` (it names its driver types as
-// `backend::adc::Adc`/`backend::clock::ClockProvider` internally now) —
-// this firmware still needs its own copy of the same cfg'd selection to
-// store one in `Firmware` below.
-#[cfg(not(target_arch = "arm"))]
-use peripherals::fake::{adc::Adc, clock::ClockProvider};
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{adc::Adc, clock::ClockProvider};
 
 /// ADC1's channel wired to the B-G431B-ESC1's potentiometer
 /// (`esc1_discovery::POTENTIOMETER_PIN`, PB12) — PB12 is ADC1_IN11, per the
@@ -86,7 +83,10 @@ impl Firmware {
             dma,
             ..
         } = peripherals;
-        adc1.open(AdcOptions::new(&SEQUENCE, &ADC1_SAMPLES), &dma);
+        adc1.open(
+            AdcOptions::new(&SEQUENCE, &ADC1_SAMPLES, AdcTriggerSource::Software),
+            &dma,
+        );
         Firmware {
             adc1,
             clock_provider,
@@ -104,7 +104,7 @@ impl Firmware {
         let clock = self.clock_provider.get_clock();
 
         self.adc1.trigger();
-        while !self.adc1.conversion_done() {}
+        while !self.adc1.try_retrieve_result() {}
         let potentiometer = self.adc1.get_sample(0);
         let vbus = self.adc1.get_sample(1);
 
@@ -223,7 +223,11 @@ mod tests {
 
         assert_eq!(
             fakes.adc1.options(),
-            Some(AdcOptions::new(&SEQUENCE, &ADC1_SAMPLES))
+            Some(AdcOptions::new(
+                &SEQUENCE,
+                &ADC1_SAMPLES,
+                AdcTriggerSource::Software
+            ))
         );
     }
 

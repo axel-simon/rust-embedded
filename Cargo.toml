@@ -12,11 +12,16 @@ members = [
     "firmware/benchtest/cordic",
     "firmware/benchtest/quadrature",
     "firmware/benchtest/pwm",
+    "firmware/benchtest/motor_control",
 ]
 # `cargo build`/`cargo run` without `-p` operate on this member only, so the
 # existing "just run it" workflow (see README.md) keeps working now that
 # firmware/ holds more than one binary. Build/test everything explicitly
 # with `--workspace`; run another benchtest with `-p <name>` (e.g. `-p adc`).
+#
+# Note: there's no default `[build] target` (see .cargo/config.toml), so
+# actually flashing/running this default member on real hardware still
+# needs `--target thumbv7em-none-eabi` explicitly — see README.md.
 default-members = ["firmware/benchtest/blinky"]
 resolver = "2"
 

@@ -14,10 +14,14 @@ use peripherals::api::gpio::{GpioPin, GpioPort, GpioTrait};
 // depending on which of these is active, letting `initialize`/
 // `BoardPeripherals` name a driver type once instead of pairing a
 // `#[cfg(target_arch = "arm")]`/`#[cfg(not(...))]` type alias for each.
+// `pub`: firmware crates can name a `BoardPeripherals`/`BoardFakePeripherals`
+// field's own type (e.g. `esc1_discovery::backend::adc::Adc`) through this
+// same alias too, instead of repeating the `#[cfg(target_arch = "arm")]`
+// branch themselves.
 #[cfg(not(target_arch = "arm"))]
-use peripherals::fake as backend;
+pub use peripherals::fake as backend;
 #[cfg(target_arch = "arm")]
-use peripherals::stm32g4 as backend;
+pub use peripherals::stm32g4 as backend;
 
 // Motor phase PWM (TIM1): CH1/CH2/CH3 drive the high side (AF6),
 // CH1N/CH2N/CH3N the complementary low side (AF4) — one pair per phase U/V/W.
@@ -29,6 +33,11 @@ pub const TIM1_CH3_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 10, 6).with_v
 pub const TIM1_CH3N_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 15, 4).with_very_high_speed();
 
 // Per-phase current shunt feedback through OPAMP1/2/3 (analog in/out).
+// The P/N pins (VINP/VINM0) are documentation only below `initialize`'s own
+// opamp bring-up block claims and drives them directly via
+// `embassy_stm32::opamp` (differential PGA, internal-only output) — they're
+// deliberately *not* in `pins`/`claim_pins!` below, since that would
+// double-claim them through this crate's own `Gpio` as well.
 pub const CURRENT_FEEDBACK1_OPAMP_P_PIN: GpioPin = GpioPin::analog(GpioPort::PA, 1);
 pub const CURRENT_FEEDBACK1_OPAMP_N_PIN: GpioPin = GpioPin::analog(GpioPort::PA, 3);
 pub const OPAMP1_OUT_PIN: GpioPin = GpioPin::analog(GpioPort::PA, 2);
@@ -119,9 +128,16 @@ pub struct BoardFakePeripherals {
     pub gpio: backend::gpio::FakeGpio,
     pub clock_provider: backend::clock::FakeClockProvider,
     pub adc1: backend::adc::FakeAdc,
+    pub adc2: backend::adc::FakeAdc,
     pub dma: backend::dma::FakeDma,
     pub quadrature: backend::quadrature::FakeQuadrature,
     pub pwm1: backend::pwm::FakePwm,
+    /// Shared with [`Self::adc1`]/[`Self::adc2`]/[`Self::pwm1`] — see
+    /// `peripherals::fake::callback_registry`. A test can also use this
+    /// directly to fire/schedule its own triggers, or advance simulated
+    /// time (in place of calling [`Self::clock_provider`]'s own
+    /// `advance_by` — this fires anything pending along the way).
+    pub callback_registry: peripherals::fake::callback_registry::CallbackRegistry,
 }
 
 /// Drivers relevant to this board and Embassy peripheral resources that do not
@@ -132,14 +148,15 @@ pub struct BoardPeripherals {
     pub clock_provider: backend::clock::ClockProvider,
     pub dma: backend::dma::Dma,
     pub adc1: backend::adc::Adc,
+    pub adc2: backend::adc::Adc,
     pub quadrature: backend::quadrature::Quadrature,
     pub pwm1: backend::pwm::Pwm,
     pub math_coprocessor: backend::math_coprocessor::MathCoprocessor,
 
     /// A test's own handles onto the same fake [`Self::gpio`]/
-    /// [`Self::clock_provider`]/[`Self::adc1`]/[`Self::dma`]/
-    /// [`Self::quadrature`]/[`Self::pwm1`] — absent on real hardware. See
-    /// [`BoardFakePeripherals`].
+    /// [`Self::clock_provider`]/[`Self::adc1`]/[`Self::adc2`]/
+    /// [`Self::dma`]/[`Self::quadrature`]/[`Self::pwm1`] — absent on real
+    /// hardware. See [`BoardFakePeripherals`].
     #[cfg(not(target_arch = "arm"))]
     pub fakes: BoardFakePeripherals,
 
@@ -171,16 +188,6 @@ pub struct BoardPeripherals {
     pub FDCANRAM1: resources::Peri<'static, resources::peripherals::FDCANRAM1>,
     /// UART behind [`USART2_TX_PIN`]/[`USART2_RX_PIN`].
     pub USART2: resources::Peri<'static, resources::peripherals::USART2>,
-    /// Feeds [`BACK_EMF2_PIN`] and others. Claimed but not yet driven by
-    /// any code — see [`BoardPeripherals::adc1`] for ADC1, which is.
-    pub ADC2: resources::Peri<'static, resources::peripherals::ADC2>,
-    /// Phase U current-sense amplifier ([`CURRENT_FEEDBACK1_OPAMP_P_PIN`]/
-    /// [`CURRENT_FEEDBACK1_OPAMP_N_PIN`]/[`OPAMP1_OUT_PIN`]).
-    pub OPAMP1: resources::Peri<'static, resources::peripherals::OPAMP1>,
-    /// Phase V current-sense amplifier.
-    pub OPAMP2: resources::Peri<'static, resources::peripherals::OPAMP2>,
-    /// Phase W current-sense amplifier.
-    pub OPAMP3: resources::Peri<'static, resources::peripherals::OPAMP3>,
 }
 
 /// Initializes the MCU and its peripherals by calling `resources::init()`
@@ -230,8 +237,6 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         PC11,
         PC13,
         PC14,
-        // Everything else this board's schematic uses but doesn't have a
-        // `GpioPin` role for — kept on `BoardPeripherals` instead.
         PA13,
         PA14,
         PB10,
@@ -250,10 +255,7 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         OPAMP1,
         OPAMP2,
         OPAMP3,
-        // DMA2's channel 1, claimed below for ADC1's own DMA request (see
-        // `Dma::claim_channel`) — every other DMA1/DMA2 channel this
-        // board doesn't use falls through to `..` like any other unused
-        // field.
+        DMA1_CH1,
         DMA2_CH1,
         ..
     } = resources::init(resources::ClockConfiguration {
@@ -264,6 +266,48 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
     // Every other field of the `Peripherals` above — every peripheral this
     // board doesn't use at all — is dropped right here.
 
+    //
+    // Embassy code for configuration.
+    // Board-specific configuration of peripherals that the firmware does not
+    // interact with later. Unit testing this code has little value, hence we
+    // avoid the complexity of defining abstract driver APIs with fake
+    // implementations and use Embassy crates directly for expedieency.
+    //
+
+    // Configures the three per-phase current-sense op-amps as differential
+    // PGAs (VINP = shunt high side, VINM0 = shunt low side/bias node) with
+    // internal-only output, routed straight into ADC1/ADC2:
+    //   * OPAMP1 -> ADC1 ch13
+    //   * OPAMP2 -> ADC2 ch16
+    //   * OPAMP3 -> ADC2 ch18
+    //
+    // `mem::forget` on each `OpAmpInternalOutput` is what keeps
+    // `CSR.OPAMPEN` set permanently — its `Drop` impl would otherwise
+    // disable the opamp the instant this function returns. `OpAmp<T>`
+    // itself has no `Drop` on g4 (`impl Drop for OpAmp` is
+    // `#[cfg(not(any(stm32g4, stm32f3)))]`), so letting `opamp1`/`2`/`3`
+    // themselves drop here (at the end of this block) is harmless.
+    #[cfg(target_arch = "arm")]
+    {
+        use embassy_stm32::opamp::{OpAmp, OpAmpGain, OpAmpSpeed};
+
+        let mut opamp1 = OpAmp::new(OPAMP1, OpAmpSpeed::Normal);
+        core::mem::forget(opamp1.pga_biased_int(PA1, PA3, OpAmpGain::Mul64));
+
+        let mut opamp2 = OpAmp::new(OPAMP2, OpAmpSpeed::Normal);
+        core::mem::forget(opamp2.pga_biased_int(PA7, PA5, OpAmpGain::Mul64));
+
+        let mut opamp3 = OpAmp::new(OPAMP3, OpAmpSpeed::Normal);
+        core::mem::forget(opamp3.pga_biased_int(PB0, PB2, OpAmpGain::Mul64));
+    }
+    // Drop the opamp-related resources on host.
+    #[cfg(not(target_arch = "arm"))]
+    let _ = (PA1, PA3, PA5, PA7, PB0, PB2, OPAMP1, OPAMP2, OPAMP3);
+
+    //
+    // Abstract peripherals.
+    //
+
     let pins = [
         TIM1_CH1_PIN,
         TIM1_CH1N_PIN,
@@ -271,14 +315,8 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         TIM1_CH2N_PIN,
         TIM1_CH3_PIN,
         TIM1_CH3N_PIN,
-        CURRENT_FEEDBACK1_OPAMP_P_PIN,
-        CURRENT_FEEDBACK1_OPAMP_N_PIN,
         OPAMP1_OUT_PIN,
-        CURRENT_FEEDBACK2_OPAMP_P_PIN,
-        CURRENT_FEEDBACK2_OPAMP_N_PIN,
         OPAMP2_OUT_PIN,
-        CURRENT_FEEDBACK3_OPAMP_P_PIN,
-        CURRENT_FEEDBACK3_OPAMP_N_PIN,
         BACK_EMF1_PIN,
         BACK_EMF2_PIN,
         BACK_EMF3_PIN,
@@ -303,15 +341,14 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
 
     let (mut gpio, _fake_gpio) = resources::split_off_fake(backend::gpio::Gpio::new());
 
-    // Claims the 34 pins: on real hardware this is just a Rust move (the
-    // `Peri` bound above is dropped, so it can't also be claimed through
-    // `embassy_stm32`'s own pin API elsewhere); on the fake backend it
-    // additionally registers each pin with the gpio peripheral driver so that
-    // pins that are later used but not registered here trigger warnings.
+    // Claims these pins: on real hardware this is a no-op but ensures that the
+    // pins cannot be claimed through `embassy_stm32`'s own pin API elsewhere;
+    // on the fake backend it additionally registers each pin with the gpio
+    // peripheral driver so that pins that are later used but not registered
+    // here trigger warnings.
     peripherals::claim_pins!(
-        gpio, PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9, PA10, PA11, PA12, PA15, PB0, PB1,
-        PB2, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB11, PB12, PB14, PB15, PC4, PC6, PC10, PC11, PC13,
-        PC14
+        gpio, PA0, PA2, PA4, PA6, PA8, PA9, PA10, PA11, PA12, PA15, PB1, PB3, PB4, PB5, PB6, PB7,
+        PB8, PB9, PB11, PB12, PB14, PB15, PC4, PC6, PC10, PC11, PC13, PC14
     );
 
     for pin in pins {
@@ -324,18 +361,28 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
 
     let (mut dma, _fake_dma) = resources::split_off_fake(backend::dma::Dma::new());
 
-    // Configures a DMA channel for transferring ADC1 data.
+    // Configures DMA channels.
+    dma.claim_channel(DMA1_CH1);
+    dma.allocate(
+        DmaChannel::new(DmaInstance::Stm32g4Dma1, 1),
+        DmaRequest::Stm32g4DmamuxReqAdc1,
+    );
     dma.claim_channel(DMA2_CH1);
     dma.allocate(
         DmaChannel::new(DmaInstance::Stm32g4Dma2, 1),
-        DmaRequest::Stm32g4DmamuxReqAdc1,
+        DmaRequest::Stm32g4DmamuxReqAdc2,
     );
 
-    // Claim the ADC1 resource and constructs a adc::Adc driver from it.
+    // Claim the ADC1 and ADC2 resources and constructs adc::Adc drivers from it.
     let adc1_instance = resources::claim_adc(ADC1);
     let (adc1, _fake_adc1) = resources::split_off_fake(backend::adc::Adc::new(
         adc1_instance,
         DmaRequest::Stm32g4DmamuxReqAdc1,
+    ));
+    let adc2_instance = resources::claim_adc(ADC2);
+    let (adc2, _fake_adc2) = resources::split_off_fake(backend::adc::Adc::new(
+        adc2_instance,
+        DmaRequest::Stm32g4DmamuxReqAdc2,
     ));
 
     // Claim TIM4 and construct a quadrature driver from it.
@@ -344,24 +391,39 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         resources::split_off_fake(backend::quadrature::Quadrature::new(quadrature_timer));
 
     // Claim TIM1 and construct a pwm::Pwm driver from it. TIM1 sits on
-    // APB2, which — like every other bus this board's PLL config (see
-    // MCU_FREQUENCY) leaves at its default DIV1 prescaler — runs at
-    // MCU_FREQUENCY with no further timer-clock multiplier.
+    // APB2, which runs at MCU_FREQUENCY.
     let pwm_timer = resources::claim_pwm_timer(TIM1);
     let (pwm1, _fake_pwm1) =
         resources::split_off_fake(backend::pwm::Pwm::new(pwm_timer, MCU_FREQUENCY));
 
-    // No `split_off_fake`: the math coprocessor has no fake counterpart.
+    // Math coprocessor. This peripheral has no fake counterpart.
     let math_coprocessor = backend::math_coprocessor::MathCoprocessor::new();
+
+    // Construct a registry for interrupts and MCU-internal triggers.
+    // Simulates hardware-triggered dynamic behavior between fakes (e.g. a
+    // PWM's periodic trigger-out edge causing an ADC's interrupt to fire
+    // once a simulated conversion time has elapsed).
+    #[cfg(not(target_arch = "arm"))]
+    let callback_registry = {
+        let registry = peripherals::fake::callback_registry::CallbackRegistry::new(
+            _fake_clock_provider.clone(),
+        );
+        adc1.set_callback_registry(registry.clone());
+        adc2.set_callback_registry(registry.clone());
+        pwm1.set_callback_registry(registry.clone());
+        registry
+    };
 
     #[cfg(not(target_arch = "arm"))]
     let fakes = BoardFakePeripherals {
         gpio: _fake_gpio,
         clock_provider: _fake_clock_provider,
         adc1: _fake_adc1,
+        adc2: _fake_adc2,
         dma: _fake_dma,
         quadrature: _fake_quadrature,
         pwm1: _fake_pwm1,
+        callback_registry,
     };
 
     BoardPeripherals {
@@ -369,6 +431,7 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         clock_provider,
         dma,
         adc1,
+        adc2,
         quadrature,
         pwm1,
         math_coprocessor,
@@ -386,9 +449,5 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         FDCAN1,
         FDCANRAM1,
         USART2,
-        ADC2,
-        OPAMP1,
-        OPAMP2,
-        OPAMP3,
     }
 }

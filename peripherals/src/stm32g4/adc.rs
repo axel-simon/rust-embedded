@@ -7,7 +7,7 @@
 
 use common::unit_interval::UnitInterval;
 
-use crate::api::adc::{AdcInstance, AdcOptions, AdcSampleBuffer, AdcTrait};
+use crate::api::adc::{AdcInstance, AdcOptions, AdcSampleBuffer, AdcTrait, AdcTriggerSource};
 use crate::api::dma::{DmaRequest, DmaTrait};
 use crate::stm32g4::dma;
 use stm32_metapac::adc::vals as adc_vals;
@@ -33,9 +33,11 @@ const ADC_RESOLUTION_BITS: u32 = 12;
 /// instances (`ADC1`/`ADC2`), backed by `stm32-metapac`. Converts a
 /// sequence of up to
 /// [`MAX_ADC_SEQUENCE_LENGTH`](crate::api::adc::MAX_ADC_SEQUENCE_LENGTH)
-/// channels per [`AdcTrait::trigger`], reading every rank's result out of the
-/// shared data register via DMA (see [`AdcTrait::open`]) before the next
-/// conversion in the sequence overwrites it.
+/// channels per triggered conversion — an [`AdcTrait::trigger`] call for
+/// [`AdcTriggerSource::Software`], or the configured wire's edge for any
+/// other [`AdcOptions::trigger_source`] — reading every rank's result out
+/// of the shared data register via DMA (see [`AdcTrait::open`]) before the
+/// next conversion in the sequence overwrites it.
 pub struct Adc {
     regs: stm32_metapac::adc::Adc,
     /// This instance's own DMAMUX request line (`Stm32g4DmamuxReqAdc1`/
@@ -45,10 +47,10 @@ pub struct Adc {
     dma_request: DmaRequest,
     /// The DMA channel `open()` found via `dma_request` and configured a
     /// transfer on — `None` until `open()` succeeds. Cached here so
-    /// `trigger()`/`conversion_done()`/`close()` don't repeat the
+    /// `arm()`/`try_retrieve_result()`/`close()` don't repeat the
     /// `lookup_channel` scan on every call.
     dma_channel: Option<crate::api::dma::DmaChannel>,
-    /// The length of the sequence `open()` last configured — `trigger()`
+    /// The length of the sequence `open()` last configured — `arm()`
     /// reloads the DMA channel's `CNDTR` with this every call, and
     /// `get_sample()` bounds-checks against it. Meaningless while
     /// `dma_channel` is `None`.
@@ -59,6 +61,11 @@ pub struct Adc {
     /// this struct allocates — see [`AdcSampleBuffer`]'s doc comment for
     /// why.
     samples: Option<&'static AdcSampleBuffer>,
+    /// The trigger source `open()` last configured — see
+    /// [`Self::arm`]/[`AdcTrait::trigger`]/[`AdcTrait::try_retrieve_result`]
+    /// for how it changes their behavior. Meaningless while `dma_channel`
+    /// is `None`; defaults to [`AdcTriggerSource::Software`] until then.
+    trigger_source: AdcTriggerSource,
 }
 
 impl Adc {
@@ -93,6 +100,7 @@ impl Adc {
             dma_channel: None,
             sequence_length: 0,
             samples: None,
+            trigger_source: AdcTriggerSource::Software,
         }
     }
 }
@@ -164,21 +172,45 @@ impl AdcTrait for Adc {
         });
         self.dma_channel = Some(dma_channel);
         self.samples = Some(buffer);
+        self.trigger_source = options.trigger_source();
 
         // Enable the ADC's own DMA request generation — RM0440 21.4.14
         // (CFGR.DMAEN) — without this the ADC never signals DMAMUX at all,
         // regardless of how the channel above is configured. ONE_SHOT
         // (the reset default, set explicitly for clarity) matches this
         // channel's non-circular config: both need re-arming per
-        // `trigger()` call, see there.
+        // triggered conversion, see `Self::arm`. EXTSEL/EXTEN route
+        // `ADSTART` to the requested `AdcTriggerSource` — see
+        // `extsel_exten`.
+        let (extsel, exten) = extsel_exten(self.trigger_source);
         self.regs.cfgr().modify(|w| {
             w.set_dmaen(adc_vals::Dmaen::ENABLE);
             w.set_dmacfg(adc_vals::Dmacfg::ONE_SHOT);
+            w.set_extsel(extsel);
+            w.set_exten(exten);
         });
 
         // Enable the ADC and wait for it to report ready — RM0440 21.4.9.
         self.regs.cr().modify(|w| w.set_aden(true));
         while !self.regs.isr().read().adrdy() {}
+
+        // A hardware `trigger_source` arms itself right away — there's no
+        // separate software step to catch its first edge (unlike
+        // `AdcTriggerSource::Software`, which only starts converting once
+        // `AdcTrait::trigger` is called). Every edge after that re-arms
+        // via `AdcTrait::try_retrieve_result` instead — see `Self::arm`.
+        // It also enables this instance's own end-of-sequence interrupt
+        // (`IER.EOSIE`, RM0440 21.4.14) right here, rather than requiring a
+        // separate opt-in call — a board wiring more than one
+        // hardware-triggered ADC to the same shared NVIC vector (ADC1/ADC2
+        // both share `ADC1_2` on this chip) gets that vector firing once
+        // per instance's completion, not once per triggered edge; see
+        // `AdcTrait::try_retrieve_result` for the matching implicit
+        // acknowledge.
+        if self.trigger_source != AdcTriggerSource::Software {
+            self.regs.ier().modify(|w| w.set_eosie(true));
+            self.arm();
+        }
     }
 
     fn close(&mut self) {
@@ -197,44 +229,46 @@ impl AdcTrait for Adc {
         });
     }
 
+    /// Only meaningful for [`AdcTriggerSource::Software`] — any other
+    /// [`AdcOptions::trigger_source`] is already armed by [`Self::open`]
+    /// (and re-armed by every [`Self::try_retrieve_result`] call after that),
+    /// so this has nothing left to do; calling it anyway is a harmless
+    /// no-op rather than a re-arm, since re-arming here could clobber a
+    /// conversion the configured wire already has in flight.
     fn trigger(&self) {
-        let dma_channel = self
-            .dma_channel
+        self.dma_channel
             .expect("trigger() called before open() succeeded");
-        let (_controller, ch, _index) = dma::dma_registers(dma_channel);
-
-        // Re-arm the DMA channel for a fresh `sequence_length`-item
-        // transfer. CNDTR can only be written while the channel is
-        // disabled (RM0440 12.4.6), and a non-circular channel needs both
-        // NDT reloaded and EN toggled off then on to transfer again after
-        // the previous transfer completed — it doesn't restart itself.
-        // CMAR isn't touched here: `open()` wrote it once, and — being a
-        // `'static`, caller-owned address (see `AdcSampleBuffer`'s doc
-        // comment) — it's still correct, without needing a driver-side
-        // trigger at all. That matters beyond just saving a register
-        // write: a future hardware-triggered sequence (e.g. off a timer)
-        // would start a transfer without ever calling this method.
-        ch.cr().modify(|w| w.set_en(false));
-        clear_transfer_flags(dma_channel);
-        ch.ndtr().write(|w| w.set_ndt(self.sequence_length as u16));
-        ch.cr().modify(|w| w.set_en(true));
-
-        self.regs.cr().modify(|w| w.set_adstart(true));
+        if self.trigger_source == AdcTriggerSource::Software {
+            self.arm();
+        }
     }
 
-    fn conversion_done(&self) -> bool {
+    fn try_retrieve_result(&self) -> bool {
         let dma_channel = self
             .dma_channel
-            .expect("conversion_done() called before open() succeeded");
+            .expect("try_retrieve_result() called before open() succeeded");
         let (controller, _ch, index) = dma::dma_registers(dma_channel);
 
         // TCIF ("transfer complete interrupt flag") — set once every rank
-        // in the sequence (armed by `trigger()`) has landed in `samples`,
-        // i.e. once `CNDTR` has counted all the way down to 0. Cleared by
-        // writing 1 (rc_w1, like GPIO's BSRR — see `crate::stm32g4::gpio`),
-        // so this can only ever observe it set once per `trigger()`.
+        // in the sequence has landed in `samples`, i.e. once `CNDTR` has
+        // counted all the way down to 0. Cleared by writing 1 (rc_w1, like
+        // GPIO's BSRR — see `crate::stm32g4::gpio`), so this can only ever
+        // observe it set once per armed conversion.
         if controller.isr().read().tcif(index) {
             controller.ifcr().write(|w| w.set_tcif(index, true));
+            // A hardware `trigger_source` needs re-arming for its next
+            // edge — see `Self::open`'s own re-arm and `Self::arm`'s doc
+            // comment. `AdcTriggerSource::Software` re-arms only via an
+            // explicit `AdcTrait::trigger` call instead. This also clears
+            // `ISR.EOS` (`rc_w1`, same clear-by-write-1 pattern used
+            // elsewhere in this file) — the matching acknowledge for the
+            // end-of-sequence interrupt `Self::open` implicitly enabled;
+            // harmless even if this particular instance's `EOSIE` isn't
+            // the one whose NVIC line an application is bound to.
+            if self.trigger_source != AdcTriggerSource::Software {
+                self.regs.isr().write(|w| w.set_eos(true));
+                self.arm();
+            }
             true
         } else {
             false
@@ -250,17 +284,53 @@ impl AdcTrait for Adc {
         let buffer = self
             .samples
             .expect("get_sample() called before open() succeeded");
-        // SAFETY: only read here, and only after `conversion_done()`
+        // SAFETY: only read here, and only after `try_retrieve_result()`
         // observed the DMA transfer that wrote this buffer — see
-        // `Adc::trigger`/`Adc::conversion_done`.
+        // `Adc::arm`/`AdcTrait::try_retrieve_result`.
         let raw = unsafe { (*buffer.0.get())[sequence_index as usize] };
         UnitInterval::new((raw as u32) << (32 - ADC_RESOLUTION_BITS))
     }
 }
 
+impl Adc {
+    /// Arms the DMA channel and the ADC itself for one more triggered
+    /// conversion — called by [`AdcTrait::open`] (to catch a hardware
+    /// `trigger_source`'s very first edge), [`AdcTrait::trigger`] (for
+    /// [`AdcTriggerSource::Software`]), and [`AdcTrait::try_retrieve_result`]
+    /// (to re-arm a hardware `trigger_source` for its next edge) — see
+    /// each's own doc comment for when it applies. Assumes `open()` has
+    /// already succeeded (every caller either just did that itself or
+    /// already checked).
+    fn arm(&self) {
+        let dma_channel = self
+            .dma_channel
+            .expect("Adc::arm called before open() succeeded");
+        let (_controller, ch, _index) = dma::dma_registers(dma_channel);
+
+        // Re-arm the DMA channel for a fresh `sequence_length`-item
+        // transfer. CNDTR can only be written while the channel is
+        // disabled (RM0440 12.4.6), and a non-circular channel needs both
+        // NDT reloaded and EN toggled off then on to transfer again after
+        // the previous transfer completed — it doesn't restart itself.
+        // CMAR isn't touched here: `open()` wrote it once, and — being a
+        // `'static`, caller-owned address (see `AdcSampleBuffer`'s doc
+        // comment) — it's still correct without rewriting it here.
+        ch.cr().modify(|w| w.set_en(false));
+        clear_transfer_flags(dma_channel);
+        ch.ndtr().write(|w| w.set_ndt(self.sequence_length as u16));
+        ch.cr().modify(|w| w.set_en(true));
+
+        // With `AdcTriggerSource::Software` (`CFGR.EXTEN` disabled — see
+        // `extsel_exten`), this starts converting immediately. With any
+        // other trigger source, this only arms the ADC to start on the
+        // configured wire's next edge instead.
+        self.regs.cr().modify(|w| w.set_adstart(true));
+    }
+}
+
 /// Clears every interrupt flag DMAMUX/DMA might have set for
 /// `dma_channel` — RM0440 12.4.4 (`IFCR`). Broader than just TCIF (see
-/// `Adc::conversion_done`) so a stale HTIF/TEIF/GIF from a previous
+/// `Adc::try_retrieve_result`) so a stale HTIF/TEIF/GIF from a previous
 /// transfer can never be misread as this one's completion.
 fn clear_transfer_flags(dma_channel: crate::api::dma::DmaChannel) {
     let (controller, _ch, index) = dma::dma_registers(dma_channel);
@@ -372,6 +442,26 @@ fn set_sample_time(regs: stm32_metapac::adc::Adc, channel: u8, sample_time: adc_
     } else {
         regs.smpr2()
             .modify(|w| w.set_smp((channel - 10) as usize, sample_time));
+    }
+}
+
+/// Maps an [`AdcTriggerSource`] to `CFGR`'s `EXTSEL`/`EXTEN` fields —
+/// RM0440 21.4.18 (Table 152, "External triggers for regular channels" —
+/// identical for every `ADCx` instance this driver supports). `EXTSEL` has
+/// no named PAC enum (it's a raw 5-bit code), so these values are cross-
+/// checked against `stm32g4xx_hal_driver`'s `stm32g4xx_ll_adc.h`
+/// (`LL_ADC_REG_TRIG_EXT_TIM*_TRGO*`) rather than transcribed from the
+/// reference manual by hand alone. `EXTEN` is always `RISING_EDGE` for a
+/// hardware source — this driver has no way to ask for anything else.
+fn extsel_exten(trigger_source: AdcTriggerSource) -> (u8, adc_vals::Exten) {
+    match trigger_source {
+        AdcTriggerSource::Software => (0, adc_vals::Exten::DISABLED),
+        AdcTriggerSource::Stm32g4Tim1TriggerOut1Rising => (9, adc_vals::Exten::RISING_EDGE),
+        AdcTriggerSource::Stm32g4Tim1TriggerOut2Rising => (10, adc_vals::Exten::RISING_EDGE),
+        AdcTriggerSource::Stm32g4Tim8TriggerOut1Rising => (7, adc_vals::Exten::RISING_EDGE),
+        AdcTriggerSource::Stm32g4Tim8TriggerOut2Rising => (8, adc_vals::Exten::RISING_EDGE),
+        AdcTriggerSource::Stm32g4Tim20TriggerOut1Rising => (16, adc_vals::Exten::RISING_EDGE),
+        AdcTriggerSource::Stm32g4Tim20TriggerOut2Rising => (17, adc_vals::Exten::RISING_EDGE),
     }
 }
 

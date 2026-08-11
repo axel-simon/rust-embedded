@@ -3,21 +3,18 @@
 
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
+// `backend::x::Y` resolves to `peripherals::stm32g4::x::Y` on real
+// hardware or `peripherals::fake::x::Y` elsewhere — see
+// `esc1_discovery::backend`'s own doc comment. Used below to name
+// [`BoardPeripherals::quadrature`]'s/[`BoardPeripherals::clock_provider`]'s
+// concrete type in `Firmware`, instead of repeating the
+// `#[cfg(target_arch = "arm")]` branch here too.
+use esc1_discovery::backend::{clock::ClockProvider, quadrature::Quadrature};
 use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::quadrature::{
     QuadratureInputConfiguration, QuadratureOptions, QuadratureTrait,
 };
-// `esc1_discovery` no longer re-exports its own backend-selected
-// `ClockProvider`/`Quadrature` (it names its driver types as
-// `backend::clock::ClockProvider`/`backend::quadrature::Quadrature`
-// internally now) — this firmware still needs its own copy of the same
-// cfg'd selection to name [`BoardPeripherals::quadrature`]'s/
-// [`BoardPeripherals::clock_provider`]'s concrete type in `Firmware` below.
-#[cfg(not(target_arch = "arm"))]
-use peripherals::fake::{clock::ClockProvider, quadrature::Quadrature};
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{clock::ClockProvider, quadrature::Quadrature};
 
 /// Channel 1 (`esc1_discovery::TIM4_QUADRATURE_A`, PB6) carries input A,
 /// channel 2 (`esc1_discovery::TIM4_QUADRATURE_B`, PB7) carries input B — no

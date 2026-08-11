@@ -79,15 +79,16 @@ Cortex-M4's own FPU has no hardware support for.
 This crate is `no_std` only for the real (`target_arch = "arm"`) target —
 `fake` needs `std::rc::Rc` unconditionally on every other target, `cfg(test)`
 or not (see `src/lib.rs`'s doc comment for why it isn't `cfg(test)`-gated).
-The workspace's `.cargo/config.toml` pins the default `cargo` target to
-`thumbv7em-none-eabi`, which has no `std` — host-side tests need an
-explicit `--target` override for your machine:
+The workspace's `.cargo/config.toml` sets no default `cargo` target, so
+plain `cargo test` already builds for your host (which has `std`) without
+any extra flags:
 
 ```sh
-cargo test -p peripherals --target <your-host-triple>
-# e.g. --target aarch64-apple-darwin on Apple Silicon macOS
+cargo test -p peripherals
 ```
 
+Building for the embedded target instead needs an explicit
+`--target thumbv7em-none-eabi` (see the root [README.md](../README.md)).
 `stm32-metapac` (and every `src/stm32g4/` driver, which depends on it) is
 only a dependency for `cfg(target_arch = "arm")`, so it's never built by
 the host-side test command above — the real drivers aren't exercised by

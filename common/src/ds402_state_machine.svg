@@ -1,0 +1,152 @@
+<svg viewBox="0 0 950 870" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    :root {
+      --node-fill: #f6f8fa;
+      --node-stroke: #57606a;
+      --node-fault-fill: #fdf1f1;
+      --node-fault-stroke: #b42318;
+      --text: #1f2328;
+      --edge-main: #57606a;
+      --edge-return: #6b5cff;
+      --edge-quickstop: #b8860b;
+      --edge-fault: #b42318;
+      --label-bg: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --node-fill: #22272e;
+        --node-stroke: #adbac7;
+        --node-fault-fill: #3a2323;
+        --node-fault-stroke: #ff8080;
+        --text: #cdd9e5;
+        --edge-main: #adbac7;
+        --edge-return: #a9a1ff;
+        --edge-quickstop: #e3b341;
+        --edge-fault: #ff8080;
+        --label-bg: #22272e;
+      }
+    }
+    .node rect { fill: var(--node-fill); stroke: var(--node-stroke); stroke-width: 1.5; }
+    .node.fault rect { fill: var(--node-fault-fill); stroke: var(--node-fault-stroke); }
+    .node text { fill: var(--text); font-size: 15px; text-anchor: middle; dominant-baseline: middle; }
+    .edge { fill: none; stroke-width: 1.5; }
+    .edge.main { stroke: var(--edge-main); }
+    .edge.return { stroke: var(--edge-return); }
+    .edge.quickstop { stroke: var(--edge-quickstop); }
+    .edge.fault { stroke: var(--edge-fault); stroke-dasharray: 5 4; }
+    .edge-label { font-size: 12px; text-anchor: middle; dominant-baseline: middle; }
+    .edge-label.main { fill: var(--edge-main); }
+    .edge-label.return { fill: var(--edge-return); }
+    .edge-label.quickstop { fill: var(--edge-quickstop); }
+    .edge-label.fault { fill: var(--edge-fault); }
+    .edge-label rect { fill: var(--label-bg); opacity: 0.9; }
+    .start-dot { fill: var(--edge-main); }
+    .caption { fill: var(--text); font-size: 12px; }
+  </style>
+
+  <defs>
+    <marker id="arrow-main" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--edge-main)" />
+    </marker>
+    <marker id="arrow-return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--edge-return)" />
+    </marker>
+    <marker id="arrow-quickstop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--edge-quickstop)" />
+    </marker>
+    <marker id="arrow-fault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--edge-fault)" />
+    </marker>
+  </defs>
+
+  <!-- ============ backward ("return") edges, arced to the left of the main column ============ -->
+  <!-- tier 1: adjacent-neighbor returns -->
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,320 Q 170,255 270,190" />
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,450 Q 170,385 270,320" />
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,580 Q 170,515 270,450" />
+  <!-- tier 2: two-hop returns -->
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,450 Q 70,320 270,190" />
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,580 Q 70,450 270,320" />
+  <!-- tier 3: full-span return -->
+  <path class="edge return" marker-end="url(#arrow-return)" d="M 270,580 Q -30,385 270,190" />
+
+  <g>
+    <g class="edge-label return"><rect x="210" y="246" width="20" height="18" rx="2"/><text x="220" y="256">7</text></g>
+    <g class="edge-label return"><rect x="210" y="376" width="20" height="18" rx="2"/><text x="220" y="386">6</text></g>
+    <g class="edge-label return"><rect x="210" y="506" width="20" height="18" rx="2"/><text x="220" y="516">5</text></g>
+    <g class="edge-label return"><rect x="160" y="311" width="20" height="18" rx="2"/><text x="170" y="321">12</text></g>
+    <g class="edge-label return"><rect x="160" y="441" width="20" height="18" rx="2"/><text x="170" y="451">8</text></g>
+    <g class="edge-label return"><rect x="110" y="376" width="20" height="18" rx="2"/><text x="120" y="386">9</text></g>
+  </g>
+
+  <!-- ============ main "happy path" chain, top to bottom ============ -->
+  <path class="edge main" marker-end="url(#arrow-main)" d="M 380,88 L 380,162" />
+  <path class="edge main" marker-end="url(#arrow-main)" d="M 380,218 L 380,292" />
+  <path class="edge main" marker-end="url(#arrow-main)" d="M 380,348 L 380,422" />
+  <path class="edge main" marker-end="url(#arrow-main)" d="M 380,478 L 380,552" />
+  <g class="edge-label main"><rect x="385" y="116" width="20" height="18" rx="2"/><text x="395" y="126">1</text></g>
+  <g class="edge-label main"><rect x="385" y="246" width="20" height="18" rx="2"/><text x="395" y="256">2</text></g>
+  <g class="edge-label main"><rect x="385" y="376" width="20" height="18" rx="2"/><text x="395" y="386">3</text></g>
+  <g class="edge-label main"><rect x="385" y="506" width="20" height="18" rx="2"/><text x="395" y="516">4</text></g>
+
+  <!-- entry into NotReadyToSwitchOn ("0 Reset") -->
+  <circle class="start-dot" cx="380" cy="14" r="4" />
+  <path class="edge main" marker-end="url(#arrow-main)" d="M 380,18 L 380,32" />
+  <g class="edge-label main"><rect x="385" y="12" width="20" height="18" rx="2"/><text x="395" y="22">0</text></g>
+
+  <!-- ============ quick-stop edges ============ -->
+  <path class="edge quickstop" marker-end="url(#arrow-quickstop)" d="M 490,568 L 540,568" />
+  <path class="edge quickstop" marker-end="url(#arrow-quickstop)" d="M 540,592 L 490,592" />
+  <g class="edge-label quickstop"><rect x="505" y="537" width="20" height="18" rx="2"/><text x="515" y="547">11</text></g>
+  <g class="edge-label quickstop"><rect x="505" y="593" width="20" height="18" rx="2"/><text x="515" y="603">16</text></g>
+
+  <!-- quick-stop -> switch on disabled -->
+  <path class="edge quickstop" marker-end="url(#arrow-quickstop)" d="M 640,552 C 800,480 800,175 490,175" />
+  <g class="edge-label quickstop"><rect x="790" y="351" width="20" height="18" rx="2"/><text x="800" y="361">10</text></g>
+
+  <!-- ============ fault edges ============ -->
+  <!-- "any state" -> fault reaction active -->
+  <text class="caption" x="380" y="710" text-anchor="middle">(any state)</text>
+  <path class="edge fault" marker-end="url(#arrow-fault)" d="M 440,710 L 540,710" />
+  <g class="edge-label fault"><rect x="475" y="701" width="20" height="18" rx="2"/><text x="485" y="711">13</text></g>
+
+  <path class="edge fault" marker-end="url(#arrow-fault)" d="M 640,738 L 640,782" />
+  <g class="edge-label fault"><rect x="645" y="751" width="20" height="18" rx="2"/><text x="655" y="761">14</text></g>
+
+  <path class="edge fault" marker-end="url(#arrow-fault)" d="M 710,812 C 900,750 900,205 490,205" />
+  <g class="edge-label fault"><rect x="875" y="499" width="20" height="18" rx="2"/><text x="885" y="509">15</text></g>
+
+  <!-- ============ nodes ============ -->
+  <g class="node">
+    <rect x="270" y="32" width="220" height="56" rx="8" />
+    <text x="380" y="60">NotReadyToSwitchOn</text>
+  </g>
+  <g class="node">
+    <rect x="270" y="162" width="220" height="56" rx="8" />
+    <text x="380" y="190">SwitchOnDisabled</text>
+  </g>
+  <g class="node">
+    <rect x="270" y="292" width="220" height="56" rx="8" />
+    <text x="380" y="320">ReadyToSwitchOn</text>
+  </g>
+  <g class="node">
+    <rect x="270" y="422" width="220" height="56" rx="8" />
+    <text x="380" y="450">SwitchedOn</text>
+  </g>
+  <g class="node">
+    <rect x="270" y="552" width="220" height="56" rx="8" />
+    <text x="380" y="580">OperationEnabled</text>
+  </g>
+  <g class="node">
+    <rect x="540" y="552" width="200" height="56" rx="8" />
+    <text x="640" y="580">QuickStopActive</text>
+  </g>
+  <g class="node fault">
+    <rect x="540" y="682" width="200" height="56" rx="8" />
+    <text x="640" y="710">FaultReactionActive</text>
+  </g>
+  <g class="node fault">
+    <rect x="570" y="784" width="140" height="56" rx="8" />
+    <text x="640" y="812">Fault</text>
+  </g>
+</svg>

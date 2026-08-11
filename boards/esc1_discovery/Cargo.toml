@@ -22,3 +22,10 @@ common = { path = "../../common" }
 # `initialize()` below.
 [target.'cfg(target_arch = "arm")'.dependencies]
 cortex-m = "0.7.7"
+# `embassy_stm32::opamp`, for the current-sense op-amp bring-up in
+# `initialize()` — same version/features as `resources`' own dependency
+# (see boards/resources/Cargo.toml), which this crate's `resources`
+# dependency already forces into the build; declared directly here too
+# since `initialize()` now names `embassy_stm32::opamp` itself, not just
+# through `resources`.
+embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "rt"] }

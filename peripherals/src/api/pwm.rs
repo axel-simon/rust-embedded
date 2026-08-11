@@ -5,15 +5,33 @@
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
 
-/// Every timer instance capable of driving this API's kind of PWM — needs
-/// an advanced-control timer's break/dead-time generator and internal
-/// channels 5/6, which only `TIM1`/`TIM8`/`TIM20` have.
+/// Every timer instance capable of driving a multi-phase,
+/// center-aligned PWM output with deadtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PwmTimer {
     Stm32g4Tim1 = 0,
     Stm32g4Tim8 = 1,
     Stm32g4Tim20 = 2,
+}
+
+impl PwmTimer {
+    /// The [`crate::api::adc::AdcTriggerSource`] representing this timer's
+    /// mid-point trigger (`TRGO2`, always channel 5 internally — see
+    /// [`PwmOptions::mid_point_trigger`]). Real hardware never needs this
+    /// (the wire between the two peripherals is physical); it exists so
+    /// the fake PWM/ADC drivers can agree on a single named simulated
+    /// trigger-out signal for a given timer, derived from one source of
+    /// truth (the `AdcTriggerSource` variant's own name) instead of two
+    /// separately-maintained string tables.
+    pub fn trigger_out_2(self) -> crate::api::adc::AdcTriggerSource {
+        use crate::api::adc::AdcTriggerSource;
+        match self {
+            PwmTimer::Stm32g4Tim1 => AdcTriggerSource::Stm32g4Tim1TriggerOut2Rising,
+            PwmTimer::Stm32g4Tim8 => AdcTriggerSource::Stm32g4Tim8TriggerOut2Rising,
+            PwmTimer::Stm32g4Tim20 => AdcTriggerSource::Stm32g4Tim20TriggerOut2Rising,
+        }
+    }
 }
 
 /// The largest [`PwmOptions::channels`] can request: channels 1-3
@@ -127,6 +145,23 @@ pub trait PwmTrait {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::adc::AdcTriggerSource;
+
+    #[test]
+    fn trigger_out_2_maps_each_timer_to_its_own_trgo2_source() {
+        assert_eq!(
+            PwmTimer::Stm32g4Tim1.trigger_out_2(),
+            AdcTriggerSource::Stm32g4Tim1TriggerOut2Rising
+        );
+        assert_eq!(
+            PwmTimer::Stm32g4Tim8.trigger_out_2(),
+            AdcTriggerSource::Stm32g4Tim8TriggerOut2Rising
+        );
+        assert_eq!(
+            PwmTimer::Stm32g4Tim20.trigger_out_2(),
+            AdcTriggerSource::Stm32g4Tim20TriggerOut2Rising
+        );
+    }
 
     #[test]
     fn new_stores_the_given_fields() {

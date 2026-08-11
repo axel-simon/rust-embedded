@@ -1,4 +1,5 @@
 pub mod adc;
+pub mod callback_registry;
 pub mod clock;
 pub mod dma;
 pub mod gpio;

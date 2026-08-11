@@ -1,8 +1,13 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "probe-rs run --chip STM32G431CB"
 
-[build]
-target = "thumbv7em-none-eabi"
+# No default `[build] target`: cargo already falls back to the host's own
+# target when none is given, which is what host-side testing/tooling
+# wants — the embedded target is the one that needs to be opted into
+# explicitly, via `--target thumbv7em-none-eabi`, since building host
+# tools for it by accident is a much easier mistake to make (and a much
+# more confusing one to debug — see e.g. `futures-timer` failing to
+# compile at all) than the reverse.
 
 [env]
 DEFMT_LOG = "info"

@@ -3,18 +3,15 @@
 
 use common::duration::Duration;
 use common::unit_interval::SymmetricUnitInterval;
+// `backend::x::Y` resolves to `peripherals::stm32g4::x::Y` on real
+// hardware or `peripherals::fake::x::Y` elsewhere — see
+// `esc1_discovery::backend`'s own doc comment. Used below for the
+// backend-selected driver types stored in `Firmware`, instead of
+// repeating the `#[cfg(target_arch = "arm")]` branch here too.
+use esc1_discovery::backend::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
 use esc1_discovery::BoardPeripherals;
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::math_coprocessor::{MathCoprocessorFunction, MathCoprocessorTrait};
-// `esc1_discovery` no longer re-exports its own backend-selected
-// `ClockProvider`/`MathCoprocessor` (it names its driver types as
-// `backend::clock::ClockProvider`/`backend::math_coprocessor::MathCoprocessor`
-// internally now) — this firmware still needs its own copy of the same
-// cfg'd selection to store one in `Firmware` below.
-#[cfg(not(target_arch = "arm"))]
-use peripherals::fake::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{clock::ClockProvider, math_coprocessor::MathCoprocessor};
 
 /// How often to compute one sine/cosine pair and print its difference
 /// from the reference implementation.
