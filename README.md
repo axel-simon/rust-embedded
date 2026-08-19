@@ -7,7 +7,10 @@ program:
 - [`blinky`](firmware/benchtest/blinky) — blinks the board's status LED on
   **PC6** at 1Hz. The default binary (see `default-members` in
   [Cargo.toml](Cargo.toml)) — `cargo build`/`cargo run` without `-p`
-  target this one.
+  target this one. There's no default `--target` (see
+  [.cargo/config.toml](.cargo/config.toml)), so building/flashing it for
+  real hardware still needs `--target thumbv7em-none-eabihf` explicitly —
+  see "Build"/"Flash & run" below.
 - [`adc`](firmware/benchtest/adc) — samples ADC1 channel 1 (the
   potentiometer, **PB12**) every 200ms and logs the raw reading via
   `defmt`.
@@ -32,7 +35,8 @@ backends for host-side testing (see
 `esc1_discovery::initialize()` uses those fake backends automatically when
 built for a non-`arm` target — each firmware's own `#[cfg(test)] mod
 tests` drives its `Firmware` struct against them with `cargo test -p
-<name> --target <your-host-triple>`.
+<name>` (no `--target` needed: with no default `--target` configured,
+cargo already builds for your host by itself).
 
 Targets the **STM32G431CB** variant (e.g. B-G431B-ESC1) by default. For a
 different G431 package/flash size, change the `stm32g431cb` feature in
@@ -46,15 +50,20 @@ with the matching flash/RAM sizes, and update the `--chip` value in
 
 ## Build
 
+No default `--target` is configured (see [.cargo/config.toml](.cargo/config.toml)),
+so it must be given explicitly to build firmware for real hardware —
+otherwise cargo builds for your host instead, which is what you want for
+`cargo test`/`cargo clippy`/editor tooling, but not for flashing.
+
 ```sh
-cargo build --release          # blinky only (the default member)
-cargo build --release --workspace   # every crate, including all firmware binaries
-cargo build --release -p adc   # a specific firmware binary
+cargo build --release --target thumbv7em-none-eabihf          # blinky only (the default member)
+cargo build --release --target thumbv7em-none-eabihf --workspace   # every crate, including all firmware binaries
+cargo build --release --target thumbv7em-none-eabihf -p adc   # a specific firmware binary
 ```
 
 ## Flash & run (requires a probe, e.g. ST-Link, and `probe-rs` installed)
 
 ```sh
-cargo run --release       # blinky
-cargo run --release -p adc
+cargo run --release --target thumbv7em-none-eabihf       # blinky
+cargo run --release --target thumbv7em-none-eabihf -p adc
 ```

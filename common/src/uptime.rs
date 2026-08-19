@@ -57,6 +57,16 @@ impl Sub<Duration> for Uptime {
     }
 }
 
+impl Sub<Uptime> for Uptime {
+    type Output = Duration;
+
+    /// The elapsed `Duration` between two points in time — `self - rhs` is
+    /// positive when `self` is later than `rhs`, negative when earlier.
+    fn sub(self, rhs: Uptime) -> Duration {
+        self.0 - rhs.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Uptime;
@@ -83,6 +93,14 @@ mod tests {
         let u = (Uptime::epoch() + Duration::new(2 * ONE_SECOND)) - Duration::new(ONE_SECOND);
         assert_eq!(u.seconds(), 1);
         assert_eq!(u.fraction(), 0);
+    }
+
+    #[test]
+    fn subtraction_of_two_uptimes_gives_the_elapsed_duration() {
+        let earlier = Uptime::epoch() + Duration::new(ONE_SECOND);
+        let later = Uptime::epoch() + Duration::new(3 * ONE_SECOND);
+        assert_eq!(later - earlier, Duration::new(2 * ONE_SECOND));
+        assert_eq!(earlier - later, Duration::new(-2 * ONE_SECOND));
     }
 
     #[test]

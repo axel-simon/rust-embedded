@@ -3,17 +3,16 @@
 
 use common::duration::Duration;
 use common::unit_interval::UnitInterval;
+// `backend::x::Y` resolves to `peripherals::stm32g4::x::Y` on real
+// hardware or `peripherals::fake::x::Y` elsewhere — see
+// `esc1_discovery::backend`'s own doc comment. Used below for the
+// backend-selected driver types stored in `Firmware`, instead of
+// repeating the `#[cfg(target_arch = "arm")]` branch here too.
+use esc1_discovery::backend::{adc::Adc, clock::ClockProvider, pwm::Pwm};
 use esc1_discovery::BoardPeripherals;
-use peripherals::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait};
+use peripherals::api::adc::{AdcOptions, AdcSampleBuffer, AdcTrait, AdcTriggerSource};
 use peripherals::api::clock::{ClockProviderTrait, ClockTrait};
 use peripherals::api::pwm::{PwmOptions, PwmTrait};
-// Backend-selected driver types: real hardware on `target_arch = "arm"`,
-// a fake elsewhere (so host-side `cargo test` works without hardware) —
-// stored in `Firmware` below.
-#[cfg(not(target_arch = "arm"))]
-use peripherals::fake::{adc::Adc, clock::ClockProvider, pwm::Pwm};
-#[cfg(target_arch = "arm")]
-use peripherals::stm32g4::{adc::Adc, clock::ClockProvider, pwm::Pwm};
 
 /// ADC1's channel wired to the B-G431B-ESC1's potentiometer (PB12) — PB12
 /// is ADC1_IN11, per the STM32G431's pin table (RM0440/datasheet Table
@@ -85,7 +84,11 @@ impl Firmware {
         } = peripherals;
 
         adc1.open(
-            AdcOptions::new(&[POTENTIOMETER_CHANNEL], &ADC1_SAMPLES),
+            AdcOptions::new(
+                &[POTENTIOMETER_CHANNEL],
+                &ADC1_SAMPLES,
+                AdcTriggerSource::Software,
+            ),
             &dma,
         );
         // TIM1 and its pins are already claimed and configured by the
@@ -121,7 +124,7 @@ impl Firmware {
         let clock = self.clock_provider.get_clock();
 
         self.adc1.trigger();
-        while !self.adc1.conversion_done() {}
+        while !self.adc1.try_retrieve_result() {}
         let potentiometer = invert(self.adc1.get_sample(0));
         let dead_time = scale_duration(potentiometer, DEAD_TIME_TUNING_MAX);
 
@@ -236,7 +239,11 @@ mod tests {
 
         assert_eq!(
             fakes.adc1.options(),
-            Some(AdcOptions::new(&[POTENTIOMETER_CHANNEL], &ADC1_SAMPLES))
+            Some(AdcOptions::new(
+                &[POTENTIOMETER_CHANNEL],
+                &ADC1_SAMPLES,
+                AdcTriggerSource::Software,
+            ))
         );
         assert_eq!(
             fakes.pwm1.options(),

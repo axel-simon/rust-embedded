@@ -51,8 +51,7 @@ impl ClockProvider {
     /// `cortex_m::Peripherals` parameter — a generic parameter rather than
     /// a concrete `cortex_m::Peripherals` so this module never needs to
     /// depend on the `cortex-m` crate at all, keeping it platform-agnostic.
-    /// Callers that don't have anything meaningful to pass (see
-    /// `boards/esc1_discovery::initialize`) can just pass `()`.
+    /// Callers that don't have anything meaningful to pass can just pass `()`.
     pub fn new<T>(_unused: T, mcu_frequency: u32) -> (Self, FakeClockProvider) {
         let state = Rc::new(ClockProviderState {
             ticks_per_second: mcu_frequency,

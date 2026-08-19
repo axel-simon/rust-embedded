@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug motor_control (probe-rs gdb)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/motor_control",
+            "servertype": "external",
+            "gdbTarget": "localhost:1337",
+            "gdbPath": "/usr/local/opt/gdb/bin/gdb",
+            "runToEntryPoint": "main",
+            "preLaunchTask": "probe-rs: start gdb server"
+        }
+    ]
+}

@@ -6,6 +6,8 @@ license = "MIT OR Apache-2.0"
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 rtic_real = { path = "../rtic_real" }
+# For `pub use rtic::Mutex;` — see src/lib.rs.
+rtic = { version = "2.3.0", features = ["thumbv7-backend"] }
 
 [target.'cfg(not(target_arch = "arm"))'.dependencies]
 rtic_fake = { path = "../rtic_fake" }

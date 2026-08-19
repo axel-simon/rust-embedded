@@ -101,7 +101,11 @@ impl GpioState {
 /// every port, without touching any real hardware. Only pins claimed via
 /// [`Gpio::claim_pin`] are considered "wired up"; calling
 /// [`GpioTrait::configure`] on any other pin still works, but warns, since
-/// that's almost always a test-setup mistake.
+/// that's almost always a test-setup mistake. Deliberately not `Clone`,
+/// matching the real driver's own (see `crate::stm32g4::gpio::Gpio`'s
+/// doc comment) — see `mod app`'s own `Shared::gpio` (in
+/// `firmware/benchtest/motor_control`) for how more than one RTIC task
+/// safely shares the single instance a board constructs instead.
 pub struct Gpio(Rc<GpioState>);
 
 /// A test's handle onto the same simulated chip a [`Gpio`] drives — see
