@@ -88,7 +88,7 @@ cargo test -p peripherals
 ```
 
 Building for the embedded target instead needs an explicit
-`--target thumbv7em-none-eabi` (see the root [README.md](../README.md)).
+`--target thumbv7em-none-eabihf` (see the root [README.md](../README.md)).
 `stm32-metapac` (and every `src/stm32g4/` driver, which depends on it) is
 only a dependency for `cfg(target_arch = "arm")`, so it's never built by
 the host-side test command above — the real drivers aren't exercised by

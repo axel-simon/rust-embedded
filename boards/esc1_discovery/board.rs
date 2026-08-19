@@ -65,7 +65,7 @@ pub const TIM4_QUADRATURE_Z: GpioPin = GpioPin::alternate(GpioPort::PB, 8, 2);
 pub const CAN_RX_PIN: GpioPin = GpioPin::alternate(GpioPort::PA, 11, 9);
 pub const CAN_TX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 9, 9).with_high_speed();
 pub const CAN_TERM_PIN: GpioPin = GpioPin::output(GpioPort::PC, 14);
-pub const CAN_SHUTDOWN_PIN: GpioPin = GpioPin::inverted_output(GpioPort::PC, 11);
+pub const CAN_SHUTDOWN_PIN: GpioPin = GpioPin::output(GpioPort::PC, 11);
 
 // UART2 (AF7): On J3.
 pub const USART2_TX_PIN: GpioPin = GpioPin::alternate(GpioPort::PB, 3, 7);
@@ -274,6 +274,21 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
     // implementations and use Embassy crates directly for expedieency.
     //
 
+    // Claim the ADC1 and ADC2 resources and construct adc::Adc drivers from
+    // them — moved ahead of the rest of this function's usual peripheral
+    // construction order so the opamp bring-up right below can claim pins
+    // through them (see `Adc::claim_pin`).
+    let adc1_instance = resources::claim_adc(ADC1);
+    let (mut adc1, _fake_adc1) = resources::split_off_fake(backend::adc::Adc::new(
+        adc1_instance,
+        DmaRequest::Stm32g4DmamuxReqAdc1,
+    ));
+    let adc2_instance = resources::claim_adc(ADC2);
+    let (mut adc2, _fake_adc2) = resources::split_off_fake(backend::adc::Adc::new(
+        adc2_instance,
+        DmaRequest::Stm32g4DmamuxReqAdc2,
+    ));
+
     // Configures the three per-phase current-sense op-amps as differential
     // PGAs (VINP = shunt high side, VINM0 = shunt low side/bias node) with
     // internal-only output, routed straight into ADC1/ADC2:
@@ -281,28 +296,40 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
     //   * OPAMP2 -> ADC2 ch16
     //   * OPAMP3 -> ADC2 ch18
     //
-    // `mem::forget` on each `OpAmpInternalOutput` is what keeps
-    // `CSR.OPAMPEN` set permanently — its `Drop` impl would otherwise
-    // disable the opamp the instant this function returns. `OpAmp<T>`
-    // itself has no `Drop` on g4 (`impl Drop for OpAmp` is
-    // `#[cfg(not(any(stm32g4, stm32f3)))]`), so letting `opamp1`/`2`/`3`
-    // themselves drop here (at the end of this block) is harmless.
+    // `Adc::claim_pin` (via `claim_pins!`) is what keeps `CSR.OPAMPEN` set
+    // permanently for each — see its own doc comment for why: its
+    // `OpAmpInternalOutput` argument's `Drop` impl would otherwise disable
+    // the opamp the instant this function returns. `OpAmp<T>` itself has
+    // no `Drop` on g4 (`impl Drop for OpAmp` is `#[cfg(not(any(stm32g4,
+    // stm32f3)))]`), so letting `opamp1`/`2`/`3` themselves drop here (at
+    // the end of this block) is harmless. These P/N input pins never go
+    // through this crate's own `Gpio`/`pins`/`claim_pins!(gpio, ...)`
+    // below — see `CURRENT_FEEDBACK*_OPAMP_*_PIN`'s doc comment —
+    // `OpAmp::pga_biased_int()` consumes them directly instead.
     #[cfg(target_arch = "arm")]
     {
         use embassy_stm32::opamp::{OpAmp, OpAmpGain, OpAmpSpeed};
 
         let mut opamp1 = OpAmp::new(OPAMP1, OpAmpSpeed::Normal);
-        core::mem::forget(opamp1.pga_biased_int(PA1, PA3, OpAmpGain::Mul64));
+        let opamp1_output = opamp1.pga_biased_int(PA1, PA3, OpAmpGain::Mul64);
+        peripherals::claim_pins!(adc1, opamp1_output);
 
         let mut opamp2 = OpAmp::new(OPAMP2, OpAmpSpeed::Normal);
-        core::mem::forget(opamp2.pga_biased_int(PA7, PA5, OpAmpGain::Mul64));
-
+        let opamp2_output = opamp2.pga_biased_int(PA7, PA5, OpAmpGain::Mul64);
         let mut opamp3 = OpAmp::new(OPAMP3, OpAmpSpeed::Normal);
-        core::mem::forget(opamp3.pga_biased_int(PB0, PB2, OpAmpGain::Mul64));
+        let opamp3_output = opamp3.pga_biased_int(PB0, PB2, OpAmpGain::Mul64);
+        peripherals::claim_pins!(adc2, opamp2_output, opamp3_output);
     }
-    // Drop the opamp-related resources on host.
+    // `Adc::claim_pin` is a no-op on the fake backend (see its own doc
+    // comment) — this just drops the raw pins/opamp singletons on host,
+    // matching the arm branch's own drop of `opamp1`/`2`/`3` at the end of
+    // its block.
     #[cfg(not(target_arch = "arm"))]
-    let _ = (PA1, PA3, PA5, PA7, PB0, PB2, OPAMP1, OPAMP2, OPAMP3);
+    {
+        peripherals::claim_pins!(adc1, PA1, PA3);
+        peripherals::claim_pins!(adc2, PA7, PA5, PB0, PB2);
+        let _ = (OPAMP1, OPAMP2, OPAMP3);
+    }
 
     //
     // Abstract peripherals.
@@ -372,18 +399,6 @@ pub fn initialize(mut mcu_interface: resources::McuInterface) -> BoardPeripheral
         DmaChannel::new(DmaInstance::Stm32g4Dma2, 1),
         DmaRequest::Stm32g4DmamuxReqAdc2,
     );
-
-    // Claim the ADC1 and ADC2 resources and constructs adc::Adc drivers from it.
-    let adc1_instance = resources::claim_adc(ADC1);
-    let (adc1, _fake_adc1) = resources::split_off_fake(backend::adc::Adc::new(
-        adc1_instance,
-        DmaRequest::Stm32g4DmamuxReqAdc1,
-    ));
-    let adc2_instance = resources::claim_adc(ADC2);
-    let (adc2, _fake_adc2) = resources::split_off_fake(backend::adc::Adc::new(
-        adc2_instance,
-        DmaRequest::Stm32g4DmamuxReqAdc2,
-    ));
 
     // Claim TIM4 and construct a quadrature driver from it.
     let quadrature_timer = resources::claim_quadrature_timer(TIM4);

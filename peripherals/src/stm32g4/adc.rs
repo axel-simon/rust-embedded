@@ -103,6 +103,26 @@ impl Adc {
             trigger_source: AdcTriggerSource::Software,
         }
     }
+
+    /// Claims ownership of an ADC-channel resource handle that isn't a
+    /// plain `GpioPin` — typically an `embassy_stm32::opamp::
+    /// OpAmpInternalOutput` wired to one of this instance's channels (see
+    /// `boards/esc1_discovery/board.rs`'s opamp bring-up), which this
+    /// crate's own `Gpio` can't claim: `OpAmp::pga_biased_int()` consumes
+    /// the raw P/N input pins directly, so they never pass through
+    /// `Gpio::claim_pin` at all.
+    ///
+    /// Unlike [`crate::stm32g4::gpio::Gpio::claim_pin`] (a plain drop),
+    /// this `mem::forget`s `pin`: an `OpAmpInternalOutput`'s `Drop` impl
+    /// disables the opamp (clears `CSR.OPAMPEN`) the instant it's
+    /// dropped, and the whole point of routing it through here instead of
+    /// a bare `core::mem::forget()` call in board code is to keep that
+    /// opamp enabled permanently, with the reason recorded alongside the
+    /// rest of this driver's own documentation. [`crate::claim_pins!`]
+    /// calls this once per pin for a whole list at once.
+    pub fn claim_pin<T>(&mut self, pin: T) {
+        core::mem::forget(pin);
+    }
 }
 
 impl AdcTrait for Adc {

@@ -4,18 +4,31 @@
 /// exponential moving average: `output += (measurement - output) /
 /// (time_constant + 1)`.
 ///
-/// The time constant's unit is abstract — it's expressed in units of
-/// [`Self::poll`] calls, not any real time unit, so it means whatever the
-/// caller's actual polling rate implies (e.g. a time constant of `20.0`
-/// polled once per millisecond behaves like a ~20ms RC low-pass; the same
-/// `20.0` polled once per PWM period instead tracks 20 periods).
+/// The time constant sets how much each new measurement moves the
+/// output: `0` makes the filter track the latest measurement exactly,
+/// while larger values blend in more history and respond more slowly.
+/// Its unit is abstract — expressed in units of [`Self::poll`] calls,
+/// not any real time unit, so it means whatever the caller's actual
+/// polling rate implies (e.g. a time constant of `20.0` polled once per
+/// millisecond behaves like a ~20ms RC low-pass; the same `20.0` polled
+/// once per PWM period instead tracks 20 periods).
 ///
-/// [`Self::new`]'s time constant only applies once the filter has settled
-/// — see [`Self::poll`].
+/// [`Self::new`]'s time constant is only the *nominal* one, reached
+/// once the filter has settled: the effective time constant [`Self::poll`]
+/// actually uses starts at `0` (so the very first call sets
+/// [`Self::output`] to exactly that first measurement, rather than
+/// slowly decaying in from `0.0`) and increases by one call's worth on
+/// every subsequent call, up to the nominal time constant — while it's
+/// still ramping up, this makes the filter compute the exact running
+/// mean of every sample seen so far (the `n`th sample is weighted
+/// `1/n`, matching a plain cumulative average), so early samples get
+/// averaged together rather than lost to a slow exponential decay;
+/// once the ramp reaches the nominal time constant, it settles into a
+/// steady-state exponential moving average from then on.
 pub struct LowPassFilter {
     nominal_time_constant: f32,
     /// Ramps from `0.0` up to `nominal_time_constant`, `1.0` per
-    /// [`Self::poll`] call — see [`Self::poll`]'s doc comment.
+    /// [`Self::poll`] call — see the type's doc comment.
     current_time_constant: f32,
     value: f32,
 }
@@ -32,18 +45,9 @@ impl LowPassFilter {
         }
     }
 
-    /// Folds in one new measurement. The *effective* time constant used
-    /// starts at `0` (so the very first call sets [`Self::output`] to
-    /// exactly that first measurement, rather than slowly decaying in
-    /// from `0.0`) and increases by one call's worth on every
-    /// subsequent call, up to [`Self::new`]'s nominal time constant —
-    /// while it's still ramping up, this makes the filter compute the
-    /// exact running mean of every sample seen so far (the `n`th sample
-    /// is weighted `1/n`, matching a plain cumulative average), so early
-    /// samples get averaged together rather than lost to a slow
-    /// exponential decay; once the ramp reaches the nominal time
-    /// constant, it settles into a steady-state exponential moving
-    /// average from then on.
+    /// Folds in one new measurement, advancing the ramp described in
+    /// the type's doc comment by one step and updating [`Self::output`]
+    /// accordingly.
     pub fn poll(&mut self, measurement: f32) {
         let alpha = 1.0 / (self.current_time_constant + 1.0);
         self.value += alpha * (measurement - self.value);

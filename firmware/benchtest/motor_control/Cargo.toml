@@ -14,6 +14,8 @@ esc1_discovery = { path = "../../../boards/esc1_discovery" }
 peripherals = { path = "../../../peripherals" }
 # `Duration`/`SymmetricUnitInterval`, used throughout src/.
 common = { path = "../../../common" }
+# `FieldOrientedControl`/`CurrentLoopOperation` — see src/main.rs.
+drivers = { path = "../../../drivers" }
 # `#[rtic_shim::app]` — real RTIC on real hardware, a host-only fake
 # elsewhere, so `src/main.rs` builds and unit-tests either way.
 rtic_shim = { path = "../../../macros/rtic_shim" }

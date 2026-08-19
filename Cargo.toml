@@ -2,6 +2,7 @@
 members = [
     "common",
     "peripherals",
+    "drivers",
     "boards/esc1_discovery",
     "boards/resources",
     "macros/rtic_shim",
@@ -21,7 +22,7 @@ members = [
 #
 # Note: there's no default `[build] target` (see .cargo/config.toml), so
 # actually flashing/running this default member on real hardware still
-# needs `--target thumbv7em-none-eabi` explicitly — see README.md.
+# needs `--target thumbv7em-none-eabihf` explicitly — see README.md.
 default-members = ["firmware/benchtest/blinky"]
 resolver = "2"
 

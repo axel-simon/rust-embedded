@@ -232,6 +232,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "drivers"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "peripherals",
+]
+
+[[package]]
 name = "embassy-embedded-hal"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -611,6 +619,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt",
+ "drivers",
  "esc1_discovery",
  "peripherals",
  "rtic",

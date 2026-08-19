@@ -9,7 +9,7 @@ program:
   [Cargo.toml](Cargo.toml)) — `cargo build`/`cargo run` without `-p`
   target this one. There's no default `--target` (see
   [.cargo/config.toml](.cargo/config.toml)), so building/flashing it for
-  real hardware still needs `--target thumbv7em-none-eabi` explicitly —
+  real hardware still needs `--target thumbv7em-none-eabihf` explicitly —
   see "Build"/"Flash & run" below.
 - [`adc`](firmware/benchtest/adc) — samples ADC1 channel 1 (the
   potentiometer, **PB12**) every 200ms and logs the raw reading via
@@ -56,14 +56,14 @@ otherwise cargo builds for your host instead, which is what you want for
 `cargo test`/`cargo clippy`/editor tooling, but not for flashing.
 
 ```sh
-cargo build --release --target thumbv7em-none-eabi          # blinky only (the default member)
-cargo build --release --target thumbv7em-none-eabi --workspace   # every crate, including all firmware binaries
-cargo build --release --target thumbv7em-none-eabi -p adc   # a specific firmware binary
+cargo build --release --target thumbv7em-none-eabihf          # blinky only (the default member)
+cargo build --release --target thumbv7em-none-eabihf --workspace   # every crate, including all firmware binaries
+cargo build --release --target thumbv7em-none-eabihf -p adc   # a specific firmware binary
 ```
 
 ## Flash & run (requires a probe, e.g. ST-Link, and `probe-rs` installed)
 
 ```sh
-cargo run --release --target thumbv7em-none-eabi       # blinky
-cargo run --release --target thumbv7em-none-eabi -p adc
+cargo run --release --target thumbv7em-none-eabihf       # blinky
+cargo run --release --target thumbv7em-none-eabihf -p adc
 ```

@@ -11,7 +11,14 @@ use crate::api::gpio::{GpioMode, GpioPin, GpioPort, GpioPull, GpioSpeed, GpioTra
 use stm32_metapac::gpio::vals;
 
 /// Register-level [`GpioTrait`] driver for a real STM32G4 chip, backed by
-/// `stm32-metapac`.
+/// `stm32-metapac`. Deliberately not `Clone`/`Copy`, even though it's
+/// zero-sized: [`GpioTrait::configure`] needs `&mut self`, and cloning
+/// this type would let two independent owners each obtain their own
+/// exclusive `&mut` and race on the same MMIO registers if `configure()`
+/// were ever called through both — see `mod app`'s own `Shared::gpio`
+/// (in `firmware/benchtest/motor_control`) for how more than one RTIC
+/// task safely shares the single instance a board constructs instead
+/// (via `Mutex::lock`, not by duplicating the value).
 pub struct Gpio;
 
 impl Gpio {

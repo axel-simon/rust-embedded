@@ -4,10 +4,16 @@ runner = "probe-rs run --chip STM32G431CB"
 # No default `[build] target`: cargo already falls back to the host's own
 # target when none is given, which is what host-side testing/tooling
 # wants — the embedded target is the one that needs to be opted into
-# explicitly, via `--target thumbv7em-none-eabi`, since building host
+# explicitly, via `--target thumbv7em-none-eabihf`, since building host
 # tools for it by accident is a much easier mistake to make (and a much
 # more confusing one to debug — see e.g. `futures-timer` failing to
 # compile at all) than the reverse.
+#
+# `eabihf`, not `eabi`: the STM32G431 is a Cortex-M4F, with a real
+# single-precision FPU — `eabihf` is what actually uses it (hardware
+# `vfp4d16sp` codegen plus the hard-float calling convention); `eabi`
+# would silently fall back to software-emulated floating point despite
+# the FPU sitting right there unused.
 
 [env]
 DEFMT_LOG = "info"

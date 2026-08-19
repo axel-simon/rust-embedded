@@ -132,6 +132,18 @@ impl PwmTrait for Pwm {
         // inserted between the two by the break/dead-time generator, not
         // by any polarity trick here. Channels beyond options.channels()
         // are left disabled (this register's reset value).
+        //
+        // Channel 5 (index 4) has no physical pin at all (see this
+        // module's "mid-point trigger" doc comment) and so no
+        // complementary output either -- `set_ccne` panics if asked for
+        // one (`assert!(n < 3)`, real for channels 1-3 only) -- but its
+        // own CC5E still gates whether OC5REF is generated at all, same
+        // as CC1E-CC4E do for their own channels' OCxREF (RM0440's CCER
+        // description covers x=1-6 uniformly). Left unset, TRGO2
+        // (mirroring OC5REF once `mid_point_trigger` configures CR2.MMS2
+        // below) never actually pulses even though CCMR3/CCR5 are
+        // otherwise fully configured -- this is `mid_point_trigger`'s
+        // actual enable step, not the `ccmr3()`/`ccr5()` writes below.
         block.ccer().write(|w| {
             for channel in 0..options.channels() {
                 let n = channel as usize;
@@ -139,6 +151,10 @@ impl PwmTrait for Pwm {
                 w.set_ccnp(n, false);
                 w.set_cce(n, true);
                 w.set_ccne(n, true);
+            }
+            if options.mid_point_trigger() {
+                w.set_ccp(4, false);
+                w.set_cce(4, true);
             }
         });
 

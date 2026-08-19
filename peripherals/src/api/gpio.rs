@@ -362,7 +362,7 @@ pub trait GpioTrait {
     fn get(&self, pin: GpioPin) -> bool;
 }
 
-/// Calls `$gpio.claim_pin(...)` once per pin resource listed, so a whole
+/// Calls `$driver.claim_pin(...)` once per pin resource listed, so a whole
 /// batch (e.g. fields just moved out of a `resources::Peripherals`, each a
 /// different concrete `Peri<'static, PAx>` type) can be claimed without
 /// writing one call per pin by hand:
@@ -379,6 +379,14 @@ pub trait GpioTrait {
 /// gpio.claim_pin(PA8);
 /// gpio.claim_pin(PC13);
 /// ```
+///
+/// Not GPIO-specific despite living here (its original home): `$driver` can
+/// be any value with a `claim_pin` method of its own — e.g.
+/// [`crate::stm32g4::adc::Adc::claim_pin`]/
+/// [`crate::fake::adc::Adc::claim_pin`], which this same macro drives for the
+/// OPAMP-internal pins routed straight into an ADC channel (see
+/// `boards/esc1_discovery/board.rs`'s opamp bring-up) rather than through this
+/// crate's own `Gpio`.
 #[macro_export]
 macro_rules! claim_pins {
     ($gpio:ident, $($pin:ident),+ $(,)?) => {

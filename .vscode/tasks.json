@@ -1,0 +1,32 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "probe-rs: start gdb server",
+            "type": "shell",
+            "command": "probe-rs",
+            "args": [
+                "gdb",
+                "--chip",
+                "STM32G431CB",
+                "--reset-halt",
+                "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/motor_control"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^never matches$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^Firing up GDB stub",
+                    "endsPattern": "^Firing up GDB stub"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        }
+    ]
+}

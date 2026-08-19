@@ -1,0 +1,17 @@
+[package]
+name = "drivers"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# `LowPassFilter`/`SymmetricUnitInterval`/`UnitInterval`, used by every
+# driver module here.
+common = { path = "../common" }
+# Every driver module here is generic over `peripherals::api` traits
+# (real or fake, real hardware or host-side test) rather than depending on
+# a concrete chip or board — see e.g. `foc`'s own doc comment. Its `fake`
+# module (used by this crate's own `#[cfg(test)] mod tests`) is available
+# unconditionally off the `arm` target, so no extra feature/dev-dependency
+# split is needed here — see `peripherals/src/lib.rs`.
+peripherals = { path = "../peripherals" }

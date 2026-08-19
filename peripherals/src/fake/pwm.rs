@@ -41,18 +41,24 @@ impl Default for PwmState {
 struct SharedState {
     state: Cell<PwmState>,
     /// Which physical timer this is — needed (only) to name the simulated
-    /// trigger-out signal (see [`PwmTimer::trigger_out_2`]); real hardware
-    /// has no equivalent use for it.
+    /// trigger-out signals (see [`PwmTimer::trigger_out_1`]/
+    /// [`PwmTimer::trigger_out_2`]); real hardware has no equivalent use
+    /// for it.
     timer: PwmTimer,
     /// Set by [`Pwm::set_callback_registry`] — `None` means trigger-out
     /// simulation is disabled (matches this fake's previous behavior,
     /// which never looked at [`PwmOptions::mid_point_trigger`] at all).
     registry: RefCell<Option<CallbackRegistry>>,
-    /// Whether the self-perpetuating trigger-out callback (see
-    /// [`PwmTrait::open`]) has already been registered with `registry` —
-    /// registered at most once per instance; `open()`/`close()` cycles
-    /// start/stop it rescheduling itself, they don't re-register it.
-    trigger_out_registered: Cell<bool>,
+    /// Whether the self-perpetuating `TRGO` (update-event, always
+    /// simulated once a registry is set — see [`Pwm::arm_trigger_out`])
+    /// callback has already been registered with `registry` — registered
+    /// at most once per instance; `open()`/`close()` cycles start/stop it
+    /// rescheduling itself, they don't re-register it.
+    update_trigger_out_registered: Cell<bool>,
+    /// Same as [`Self::update_trigger_out_registered`], for `TRGO2` (the
+    /// mid-point trigger, only simulated when
+    /// [`PwmOptions::mid_point_trigger`] is set).
+    mid_point_trigger_out_registered: Cell<bool>,
 }
 
 impl SharedState {
@@ -106,16 +112,21 @@ impl Pwm {
             state: Cell::new(PwmState::default()),
             timer,
             registry: RefCell::new(None),
-            trigger_out_registered: Cell::new(false),
+            update_trigger_out_registered: Cell::new(false),
+            mid_point_trigger_out_registered: Cell::new(false),
         });
         (Pwm(state.clone()), FakePwm(state))
     }
 
     /// Enables trigger-out simulation: from the next [`PwmTrait::open`]
-    /// call with [`PwmOptions::mid_point_trigger`] set, this instance
-    /// periodically fires its [`PwmTimer::trigger_out_2`] trigger through
+    /// call, this instance periodically fires its
+    /// [`PwmTimer::trigger_out_1`] trigger (`TRGO`, unconditionally,
+    /// matching real hardware always configuring `CR2.MMS = UPDATE`) and,
+    /// if [`PwmOptions::mid_point_trigger`] is also set, its
+    /// [`PwmTimer::trigger_out_2`] trigger (`TRGO2`) too — both through
     /// `registry`, at the configured [`PwmOptions::frequency_hz`] — see
-    /// `crate::fake::adc`, which subscribes to it.
+    /// `crate::fake::adc`, which subscribes to whichever one an
+    /// `AdcTriggerSource` names.
     ///
     /// Call before `open()` if `open()` will set
     /// [`PwmOptions::mid_point_trigger`] at all: `open()` panics in that
@@ -123,7 +134,10 @@ impl Pwm {
     /// there's no useful way to run a mid-point-triggering fake PWM
     /// without one, and silently dropping every trigger-out edge instead
     /// would just turn into a test whose ADCs mysteriously never see a
-    /// conversion complete.
+    /// conversion complete. `TRGO`'s own simulation has no such
+    /// requirement — it's simply skipped (matching this fake's original,
+    /// pre-trigger-out-simulation behavior) if no registry was set, since
+    /// plenty of callers of this fake never need it at all.
     pub fn set_callback_registry(&self, registry: CallbackRegistry) {
         *self.0.registry.borrow_mut() = Some(registry);
     }
@@ -197,17 +211,60 @@ fn period_ns(frequency_hz: u32) -> i64 {
 
 impl Pwm {
     /// Wires up simulated trigger-out firing for `options`, if
-    /// [`Self::set_callback_registry`] was called and
-    /// [`PwmOptions::mid_point_trigger`] is set — see
-    /// [`Self::set_callback_registry`]'s doc comment.
+    /// [`Self::set_callback_registry`] was called — see its own doc
+    /// comment for which of `TRGO`/`TRGO2` that covers.
     fn arm_trigger_out(&self, options: PwmOptions) {
-        if !options.mid_point_trigger() {
-            return;
+        if self.0.registry.borrow().is_some() {
+            self.arm_update_trigger_out(options);
         }
+        if options.mid_point_trigger() {
+            self.arm_mid_point_trigger_out(options);
+        }
+    }
+
+    /// `TRGO` (update event) — always simulated, once a registry is set,
+    /// regardless of [`PwmOptions::mid_point_trigger`] (see
+    /// [`Self::set_callback_registry`]'s doc comment) — fires once per
+    /// full period, at the counter's simulated underflow (the start of
+    /// each period, mirroring real hardware's `CR2.MMS = UPDATE`).
+    fn arm_update_trigger_out(&self, options: PwmOptions) {
+        let registry =
+            self.0.registry.borrow().clone().expect(
+                "arm_update_trigger_out called without a registry -- caller already checked",
+            );
+        let name = format!("{:?}", self.0.timer.trigger_out_1());
+
+        if !self.0.update_trigger_out_registered.replace(true) {
+            let shared = self.0.clone();
+            let hook_name = name.clone();
+            registry.register(hook_name.clone(), move |fired_at| {
+                // Reads live state every firing, rather than capturing
+                // `options` once, so a later `open()` with a different
+                // frequency (or `close()`) is picked up immediately.
+                let Some(options) = shared.state.get().options else {
+                    return; // closed: stop perpetuating
+                };
+                shared.registry().schedule(
+                    hook_name.clone(),
+                    fired_at + Duration::from_nanos(period_ns(options.frequency_hz()) as i32),
+                );
+            });
+        }
+
+        registry.schedule(
+            name,
+            registry.now() + Duration::from_nanos(period_ns(options.frequency_hz()) as i32),
+        );
+    }
+
+    /// `TRGO2` (mid-point trigger) — only simulated when
+    /// [`PwmOptions::mid_point_trigger`] is set — fires half a period
+    /// after each `TRGO`, at the counter's simulated peak.
+    fn arm_mid_point_trigger_out(&self, options: PwmOptions) {
         let registry = self.0.registry(); // panics if none was set — see its own doc comment
         let name = format!("{:?}", self.0.timer.trigger_out_2());
 
-        if !self.0.trigger_out_registered.replace(true) {
+        if !self.0.mid_point_trigger_out_registered.replace(true) {
             let shared = self.0.clone();
             let hook_name = name.clone();
             registry.register(hook_name.clone(), move |fired_at| {

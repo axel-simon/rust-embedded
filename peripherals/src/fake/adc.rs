@@ -172,6 +172,22 @@ impl Adc {
     pub fn set_callback_registry(&self, registry: CallbackRegistry) {
         *self.0.registry.borrow_mut() = Some(registry);
     }
+
+    /// The fake counterpart of [`crate::stm32g4::adc::Adc::claim_pin`] —
+    /// see its doc comment for what it's for on real hardware
+    /// (`OpAmpInternalOutput`-style resources routed into one of this
+    /// instance's channels, bypassing `Gpio::claim_pin`). Deliberately a
+    /// no-op here: unlike a claimed *GPIO* pin (which the fake tracks, so
+    /// `GpioTrait::configure` can warn about ones never registered — see
+    /// `crate::fake::gpio::Gpio::claim_pin`), there's no equivalent
+    /// simulated register for an ADC channel to protect, and mapping `T`
+    /// to a specific channel number would need this crate to duplicate
+    /// `embassy_stm32`'s own (chip-specific, and privately sealed —
+    /// `SealedAdcChannel::channel()` isn't reachable outside that crate at
+    /// all) pin/channel table, which is exactly the kind of per-target
+    /// bifurcation this fake is meant to stay free of. [`crate::claim_pins!`]
+    /// calls this once per pin for a whole list at once.
+    pub fn claim_pin<T>(&mut self, _pin: T) {}
 }
 
 impl AdcTrait for Adc {

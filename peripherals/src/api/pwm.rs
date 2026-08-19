@@ -32,6 +32,22 @@ impl PwmTimer {
             PwmTimer::Stm32g4Tim20 => AdcTriggerSource::Stm32g4Tim20TriggerOut2Rising,
         }
     }
+
+    /// The [`crate::api::adc::AdcTriggerSource`] representing this timer's
+    /// update-event trigger (`TRGO`, `CR2.MMS = UPDATE` — configured
+    /// unconditionally by [`crate::stm32g4::pwm::Pwm::open`], regardless
+    /// of [`PwmOptions::mid_point_trigger`], unlike [`Self::trigger_out_2`]).
+    /// Same purpose as [`Self::trigger_out_2`]: a single named source of
+    /// truth the fake PWM/ADC drivers agree on for their simulated
+    /// trigger-out signal.
+    pub fn trigger_out_1(self) -> crate::api::adc::AdcTriggerSource {
+        use crate::api::adc::AdcTriggerSource;
+        match self {
+            PwmTimer::Stm32g4Tim1 => AdcTriggerSource::Stm32g4Tim1TriggerOut1Rising,
+            PwmTimer::Stm32g4Tim8 => AdcTriggerSource::Stm32g4Tim8TriggerOut1Rising,
+            PwmTimer::Stm32g4Tim20 => AdcTriggerSource::Stm32g4Tim20TriggerOut1Rising,
+        }
+    }
 }
 
 /// The largest [`PwmOptions::channels`] can request: channels 1-3
