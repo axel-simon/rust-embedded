@@ -62,13 +62,15 @@ const PWM_FREQUENCY_HZ: u32 = 20_000;
 const PWM_CHANNELS: u8 = 3;
 
 /// Quadrature encoder configuration (J8 header) — channel 1 carries input
-/// A, channel 2 input B, no swap needed. `ENCODER_COUNTS` is a placeholder
-/// matching this workspace's own test rig (see
-/// `firmware/benchtest/quadrature`), not a fact about any particular motor
-/// — adjust to whatever encoder is actually attached.
+/// A, channel 2 input B, no swap needed. `ENCODER_COUNTS` is empirically
+/// determined for the encoder actually attached to this rig's motor — not
+/// this workspace's own test-rig placeholder (128, see
+/// `firmware/benchtest/quadrature`) — and confirmed correct by the motor
+/// actually spinning under closed-loop control. Adjust if the attached
+/// encoder ever changes.
 const QUADRATURE_INPUT_CONFIGURATION: QuadratureInputConfiguration =
     QuadratureInputConfiguration::Ch12AreInputsAB;
-const ENCODER_COUNTS: u32 = 128;
+const ENCODER_COUNTS: u32 = 4000;
 
 /// The voltage fraction [`FieldOrientedControl`] injects into phase U
 /// during [`CurrentLoopOperation::PhaseLock`].
@@ -99,7 +101,7 @@ const BIAS_AVERAGE_WINDOW: Duration = Duration::from_millis(5);
 /// every angle `FieldOrientedControl` computes afterward. Unmeasured
 /// placeholder (like [`BIAS_AVERAGE_WINDOW`]) — tune against the
 /// attached motor/load's actual settling time.
-const PHASE_LOCK_SETTLE_WINDOW: Duration = Duration::from_millis(50);
+const PHASE_LOCK_SETTLE_WINDOW: Duration = Duration::from_millis(500);
 
 /// Nominal time constant (in [`Firmware::step`] calls, i.e. main-loop
 /// iterations — see [`LowPassFilter`]'s own doc comment for what the
@@ -132,20 +134,30 @@ fn complete_initialization(state: ds402::State) -> ds402::State {
     }
 }
 
-// TEMPORARY diagnostic instrumentation — see `mod app`'s `Local::diag_counter`
-// doc comment. A method (not a bare `u32`), so `cx.local.diag_counter.tick()`
-// works identically whether `Local` fields are owned by value (fake backend)
-// or borrowed `&mut` (real RTIC) — same reason every other mutated `Local`
-// field in this app (e.g. `firmware`) is only ever accessed through methods.
-#[derive(Default)]
-struct DiagCounter(u32);
+// TEMPORARY diagnostic instrumentation -- a plain `static`, not an RTIC
+// `Local`, so its address is a fixed symbol `probe-rs read` can peek
+// directly (via `nm`/`objdump` on the ELF) without attaching a debugger or
+// setting breakpoints, to check from outside whether `adc_isr` has entered
+// at all. DO NOT SUBMIT.
+#[cfg(target_arch = "arm")]
+static ADC_ISR_ENTRIES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
-impl DiagCounter {
-    fn tick(&mut self) -> u32 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
-    }
-}
+// TEMPORARY diagnostic instrumentation -- tracks the largest gap ever seen
+// between two consecutive `adc_isr` entries, in DWT cycle-counter ticks
+// (see `peripherals::stm32g4::clock`, already started by this app's own
+// `ClockProvider::new()` well before `adc_isr` can first run) -- to check
+// from outside, via `probe-rs read`, whether RTT logging in `idle` (which
+// defmt-rtt serializes under a *global* critical section, not RTIC's own
+// priority-ceiling locks -- see `disable-blocking-mode` on this
+// workspace's `defmt-rtt` dependency) was ever stalling this interrupt.
+// `LAST_ADC_ISR_CYCLE`'s initial `0` reads as one huge bogus interval on
+// the very first entry; harmless, since real stalls dwarf a few startup
+// cycles and this is diagnostic-only. DO NOT SUBMIT.
+#[cfg(target_arch = "arm")]
+static LAST_ADC_ISR_CYCLE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+#[cfg(target_arch = "arm")]
+static MAX_ADC_ISR_INTERVAL_CYCLES: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(0);
 
 /// A fault the main loop has observed. `pub`, not private, for the same
 /// reason as [`CurrentLoopOperation`]: it's a `#[shared]` field type
@@ -163,30 +175,6 @@ pub enum Fault {
     /// the time ADC2's (deliberately longer, see `bring_up`'s doc
     /// comment) sequence completes, but it hadn't.
     AdcConversionIncomplete,
-}
-
-/// This app's single "enable" gesture: a confirmed button press,
-/// cascading DS402 transitions 2 (Shutdown) and 3 (Switch On) in one step
-/// from [`ds402::State::SwitchOnDisabled`] to [`ds402::State::SwitchedOn`]
-/// (skipping over [`ds402::State::ReadyToSwitchOn`] as an observable
-/// state — this app has no fieldbus master issuing them as discrete
-/// commands) — or transition 11 (Quick Stop) from
-/// [`ds402::State::OperationEnabled`]. A no-op (returns `state`
-/// unchanged) from every other state — this app doesn't yet drive fault
-/// handling or resuming from quick stop (transition 16).
-///
-/// Transition 4 (Enable Operation, [`ds402::State::SwitchedOn`] ->
-/// [`ds402::State::OperationEnabled`]) is deliberately *not* handled
-/// here: unlike every other transition in this function, it also needs
-/// [`PHASE_LOCK_SETTLE_WINDOW`] to have elapsed, so [`Firmware::step`]'s
-/// own `SwitchedOn` arm drives it directly instead. See
-/// [`complete_initialization`] for why this is a free function.
-fn on_confirmed_button_press(state: ds402::State) -> ds402::State {
-    match state {
-        ds402::State::SwitchOnDisabled => ds402::State::SwitchedOn,
-        ds402::State::OperationEnabled => ds402::State::QuickStopActive,
-        other => other,
-    }
 }
 
 /// Everything the main loop (the DS402 state machine) does after chip
@@ -218,8 +206,22 @@ struct Firmware {
     /// [`Self::step`] call — compared against its current confirmed state
     /// each call to edge-detect a fresh confirmed press (a `false ->
     /// true` transition), so a press held across multiple `step()` calls
-    /// only triggers [`on_confirmed_button_press`] once.
+    /// only flips [`Self::enable_target`] once per press.
     button_was_active: bool,
+    /// The direction the button last commanded: `Some(true)` means the
+    /// state machine should be heading for (or sitting at)
+    /// [`ds402::State::OperationEnabled`], `Some(false)` means it should
+    /// be heading for (or sitting at) [`ds402::State::SwitchOnDisabled`];
+    /// `None` (the initial value) means no press has been confirmed yet,
+    /// so nothing should move on its own. Flipped once per confirmed
+    /// press, in [`Self::step`], regardless of which state that press
+    /// happens to land in. Only [`ds402::State::SwitchOnDisabled`] and
+    /// [`ds402::State::OperationEnabled`] themselves act on it (see each
+    /// arm's own comment); [`ds402::State::SwitchedOn`] doesn't, so one
+    /// press is still enough to cascade all the way from
+    /// `SwitchOnDisabled` to `OperationEnabled` (through `SwitchedOn`'s
+    /// phase-lock settle window) without a second press once settled.
+    enable_target: Option<bool>,
     /// The most severe [`Fault`] observed so far — see [`Self::report_fault`].
     fault: Fault,
     /// Low-pass filters the raw VBUS reading `mod app`'s `adc_isr`
@@ -246,6 +248,7 @@ impl Firmware {
             phase_lock_since: None,
             button_debouncer: Debouncer::new(DEBOUNCE_DURATION, DEBOUNCE_DURATION),
             button_was_active: false,
+            enable_target: None,
             fault: Fault::None,
             bus_voltage_filter: LowPassFilter::new(BUS_VOLTAGE_FILTER_TIME_CONSTANT),
             last_logged_physical_position_at: None,
@@ -296,6 +299,18 @@ impl Firmware {
             last_physical_position
         });
 
+        // Flips `enable_target` once per confirmed press, regardless of
+        // which state that press happens to land in -- see
+        // `Self::enable_target`'s own doc comment for why this lives here
+        // rather than inside each state's own arm below (as it used to).
+        // `unwrap_or(false)` treats "no press confirmed yet" (`None`) the
+        // same as "currently targeting disabled" for this purpose, so the
+        // very first confirmed press always targets `OperationEnabled`.
+        if self.confirmed_button_press(now, raw_button_pressed) {
+            self.enable_target = Some(!self.enable_target.unwrap_or(false));
+        }
+
+        let previous_state = self.state;
         let operation = match self.state {
             ds402::State::NotReadyToSwitchOn => {
                 // `current_loop_operation` already starts (and stays)
@@ -311,8 +326,14 @@ impl Firmware {
                 None
             }
             ds402::State::SwitchOnDisabled => {
-                if self.confirmed_button_press(now, raw_button_pressed) {
-                    self.state = on_confirmed_button_press(self.state);
+                // This app's single "enable" gesture: cascading DS402
+                // transitions 2 (Shutdown) and 3 (Switch On) in one step,
+                // straight to `SwitchedOn` — skipping over
+                // `ReadyToSwitchOn` as an observable state, since this app
+                // has no fieldbus master issuing them as discrete
+                // commands.
+                if self.enable_target == Some(true) {
+                    self.state = ds402::State::SwitchedOn;
                 }
                 None
             }
@@ -323,25 +344,26 @@ impl Firmware {
                 // the rotor needs real time to actually rotate into
                 // alignment, and the zero position `FieldOrientedControl`
                 // captures keeps tracking reality for as long as this
-                // stays commanded. A confirmed press only advances to
-                // `OperationEnabled` once `PHASE_LOCK_SETTLE_WINDOW` has
-                // had time to elapse -- `confirmed_button_press` is still
-                // called unconditionally either way, so a press during
-                // that window still edge-detects normally (and is simply
-                // not acted on) rather than leaving `button_was_active`
-                // stale once the window does elapse.
+                // stays commanded. Doesn't consult `enable_target` at all
+                // -- unlike `SwitchOnDisabled`/`OperationEnabled`, this
+                // state always advances once settled, regardless of
+                // whether the target has since flipped back to `false`;
+                // `OperationEnabled`'s own arm reacts to that on the very
+                // next step instead, cascading on down through
+                // `QuickStopActive` from there.
                 let since = *self.phase_lock_since.get_or_insert(now);
-                let settled = now >= since + PHASE_LOCK_SETTLE_WINDOW;
-                let confirmed_press = self.confirmed_button_press(now, raw_button_pressed);
-                if settled && confirmed_press {
+                if now >= since + PHASE_LOCK_SETTLE_WINDOW {
                     self.phase_lock_since = None;
                     self.state = ds402::State::OperationEnabled;
                 }
                 Some(CurrentLoopOperation::PhaseLock)
             }
             ds402::State::OperationEnabled => {
-                if self.confirmed_button_press(now, raw_button_pressed) {
-                    self.state = on_confirmed_button_press(self.state);
+                // Transition 11 (Quick Stop): this app doesn't yet drive
+                // fault handling or resuming from quick stop (transition
+                // 16).
+                if self.enable_target == Some(false) {
+                    self.state = ds402::State::QuickStopActive;
                     Some(CurrentLoopOperation::Open)
                 } else {
                     Some(CurrentLoopOperation::CurrentControl(
@@ -351,14 +373,14 @@ impl Firmware {
             }
             ds402::State::QuickStopActive => {
                 // Clears state and returns to `SwitchOnDisabled`
-                // unconditionally -- not gated on a further button press,
+                // unconditionally -- not gated on `enable_target` at all,
                 // unlike every other transition here: this app collapses
                 // fieldbus-issued DS402 commands into automatic app-level
-                // behavior throughout (see e.g. `on_confirmed_button_press`'s
-                // own doc comment), and there's no further command this
-                // app would wait for once a quick stop has been
-                // commanded. `phase_lock_since` is reset so a fresh
-                // settle window runs the next time `SwitchedOn` is
+                // behavior throughout (see e.g. this match's own
+                // `SwitchOnDisabled`/`OperationEnabled` arms), and there's
+                // no further command this app would wait for once a quick
+                // stop has been commanded. `phase_lock_since` is reset so
+                // a fresh settle window runs the next time `SwitchedOn` is
                 // re-entered, rather than reusing however much of the
                 // old one happened to already elapse.
                 self.phase_lock_since = None;
@@ -366,10 +388,27 @@ impl Firmware {
                 Some(CurrentLoopOperation::Open)
             }
             // ReadyToSwitchOn is skipped over as an observable state (see
-            // `on_confirmed_button_press`'s doc comment); fault handling
+            // this match's own `SwitchOnDisabled` arm); fault handling
             // isn't wired up yet.
             _ => None,
         };
+
+        // Logs every DS402 transition this step took, whatever arm above
+        // took it -- one generic check here instead of a `defmt::info!`
+        // call duplicated into every arm, so a future arm can't add a
+        // transition and forget to log it.
+        #[cfg(not(test))]
+        if self.state != previous_state {
+            defmt::info!(
+                "ds402: {} -> {} (enable_target={})",
+                defmt::Debug2Format(&previous_state),
+                defmt::Debug2Format(&self.state),
+                self.enable_target
+            );
+        }
+        #[cfg(test)]
+        let _ = previous_state;
+
         (operation, filtered_bus_voltage, physical_position_to_log)
     }
 
@@ -509,8 +548,8 @@ mod rtic_device {
 #[rtic_shim::app(device = crate::rtic_device)]
 mod app {
     use super::{
-        bring_up, Adc, CurrentLoopOperation, DiagCounter, Fault, Firmware, Foc, Gpio, Pwm,
-        Quadrature, UnitInterval,
+        bring_up, Adc, CurrentLoopOperation, Fault, Firmware, Foc, Gpio, Pwm, Quadrature,
+        UnitInterval,
     };
     // `#[allow(unused_imports)]`: on real RTIC, the generated `.lock()`
     // resolves without this trait explicitly in scope (its accessor types
@@ -549,13 +588,22 @@ mod app {
         /// Same `adc_isr` -> `idle` direction as `Self::last_potentiometer`/
         /// `Self::last_bus_voltage`.
         pub(crate) last_physical_position: UnitInterval,
+        /// Each phase's current reading (`u`, `v`, `w`, in that order) —
+        /// the same values `adc_isr` passes into
+        /// `FieldOrientedControl::poll` this cycle — published here too
+        /// so `idle` can log them (rate-limited — see `Firmware::step`).
+        /// Same `adc_isr` -> `idle` direction as `Self::last_potentiometer`/
+        /// `Self::last_bus_voltage`/`Self::last_physical_position`.
+        pub(crate) last_currents: (UnitInterval, UnitInterval, UnitInterval),
         /// The single `Gpio` `bring_up` constructs, shared between `idle`
         /// (reading the button pin, for [`Firmware::step`]'s
         /// `raw_button_pressed` parameter) and `adc_isr` (driving
         /// [`esc1_discovery::CAN_SHUTDOWN_PIN`] high/low around its own
-        /// body — a TEMPORARY diagnostic, see `Local::diag_counter`'s
-        /// doc comment) — not a second, independently-owned or cloned
-        /// handle: `GpioTrait::configure` requires `&mut self`, so
+        /// body — a TEMPORARY diagnostic letting real hardware show this
+        /// ISR's actual entry-to-exit timing and firing rate externally,
+        /// independent of anything `defmt` logs) — not a second,
+        /// independently-owned or cloned handle: `GpioTrait::configure`
+        /// requires `&mut self`, so
         /// letting each task hold its own owned `Gpio` would let both
         /// independently obtain an exclusive `&mut` and race on the same
         /// MMIO registers if `configure()` were ever called through
@@ -591,11 +639,6 @@ mod app {
         pub(crate) foc: Foc,
         /// Owned here, not by `Foc` — see `Foc`'s own doc comment for why.
         pub(crate) quadrature: Quadrature,
-        // TEMPORARY diagnostic instrumentation — see `adc_isr`'s own
-        // `#[cfg(not(test))]` diagnostic prints. Remove alongside those
-        // once the "physical position always logs 0 on real hardware"
-        // issue is root-caused.
-        pub(crate) diag_counter: DiagCounter,
         #[cfg(not(target_arch = "arm"))]
         pub(crate) fakes: esc1_discovery::BoardFakePeripherals,
     }
@@ -627,6 +670,11 @@ mod app {
                 last_bus_voltage: UnitInterval::new(0),
                 filtered_bus_voltage: UnitInterval::new(0),
                 last_physical_position: UnitInterval::new(0),
+                last_currents: (
+                    UnitInterval::new(0),
+                    UnitInterval::new(0),
+                    UnitInterval::new(0),
+                ),
                 gpio,
             },
             Local {
@@ -636,7 +684,6 @@ mod app {
                 pwm1,
                 foc,
                 quadrature,
-                diag_counter: DiagCounter::default(),
                 #[cfg(not(target_arch = "arm"))]
                 fakes,
             },
@@ -657,7 +704,7 @@ mod app {
         local = [firmware],
         shared = [
             current_loop_operation, last_potentiometer, pending_fault, last_bus_voltage,
-            filtered_bus_voltage, last_physical_position, &gpio
+            filtered_bus_voltage, last_physical_position, last_currents, &gpio
         ]
     )]
     fn idle(mut cx: idle::Context) {
@@ -666,6 +713,7 @@ mod app {
         let last_potentiometer = cx.shared.last_potentiometer.lock(|p| *p);
         let last_bus_voltage = cx.shared.last_bus_voltage.lock(|v| *v);
         let last_physical_position = cx.shared.last_physical_position.lock(|p| *p);
+        let last_currents = cx.shared.last_currents.lock(|c| *c);
         // `&gpio` above (not bare `gpio`): `.get()` only needs `&self` and
         // is a single atomic MMIO read (see `Shared::gpio`'s doc comment),
         // so RTIC hands this out as a plain shared reference, with no
@@ -695,72 +743,19 @@ mod app {
         // not reported as unused.
         #[cfg(not(test))]
         if let Some(position) = physical_position_to_log {
-            defmt::info!("physical position: {}", f32::from(position));
-
-            // TEMPORARY diagnostic instrumentation, independent of
-            // `adc_isr`/RTIC/interrupts entirely — raw register peeks to
-            // isolate whether TIM1 is actually counting and whether ADC1
-            // has EVER completed a conversion, since `adc_isr` (bound to
-            // the ADC1_2 interrupt) has never been observed to fire at
-            // all. See `Local::diag_counter`'s doc comment.
-            #[cfg(target_arch = "arm")]
-            {
-                let cnt_before = stm32_metapac::TIM1.cnt().read().cnt();
-                cortex_m::asm::delay(1_000_000);
-                let cnt_after = stm32_metapac::TIM1.cnt().read().cnt();
-                let tim1_cr1 = stm32_metapac::TIM1.cr1().read();
-                let tim1_cr2 = stm32_metapac::TIM1.cr2().read();
-                let tim1_psc = stm32_metapac::TIM1.psc().read();
-                let tim1_arr = stm32_metapac::TIM1.arr().read().arr();
-                let tim1_smcr = stm32_metapac::TIM1.smcr().read();
-                let tim1_ccmr3 = stm32_metapac::TIM1.ccmr3().read();
-                let tim1_ccr5 = stm32_metapac::TIM1.ccr5().read().ccr();
-                let tim1_bdtr = stm32_metapac::TIM1.bdtr().read();
-                let tim1_sr = stm32_metapac::TIM1.sr().read();
-                let rcc_apb2enr = stm32_metapac::RCC.apb2enr().read();
-                let rcc_cfgr = stm32_metapac::RCC.cfgr().read();
-                let adc1_cr = stm32_metapac::ADC1.cr().read();
-                let adc1_isr = stm32_metapac::ADC1.isr().read();
-                let adc1_cfgr = stm32_metapac::ADC1.cfgr().read();
-                let adc1_ier = stm32_metapac::ADC1.ier().read();
-                let nvic_enabled =
-                    cortex_m::peripheral::NVIC::is_enabled(stm32_metapac::Interrupt::ADC1_2);
-                let nvic_pending =
-                    cortex_m::peripheral::NVIC::is_pending(stm32_metapac::Interrupt::ADC1_2);
-                let nvic_active =
-                    cortex_m::peripheral::NVIC::is_active(stm32_metapac::Interrupt::ADC1_2);
-                defmt::info!(
-                    "diag: TIM1 cen={} psc={} arr={} cnt {}->{} mms2={} sms={} ts={} ocm5={} ccr5={} moe={} bif={} | RCC tim1en={} sws={} | ADC1 aden={} adstart={} adrdy={} eos={} ovr={} eosie={} extsel={} exten={} | NVIC enabled={} pending={} active={}",
-                    tim1_cr1.cen(),
-                    tim1_psc,
-                    tim1_arr,
-                    cnt_before,
-                    cnt_after,
-                    tim1_cr2.mms2() as u8,
-                    tim1_smcr.sms() as u8,
-                    tim1_smcr.ts() as u8,
-                    tim1_ccmr3.ocm(0) as u8,
-                    tim1_ccr5,
-                    tim1_bdtr.moe(),
-                    tim1_sr.bif(0),
-                    rcc_apb2enr.tim1en(),
-                    rcc_cfgr.sws() as u8,
-                    adc1_cr.aden(),
-                    adc1_cr.adstart(),
-                    adc1_isr.adrdy(),
-                    adc1_isr.eos(),
-                    adc1_isr.ovr(),
-                    adc1_ier.eosie(),
-                    adc1_cfgr.extsel(),
-                    adc1_cfgr.exten() as u8,
-                    nvic_enabled,
-                    nvic_pending,
-                    nvic_active
-                );
-            }
+            defmt::info!(
+                "ds402={} encoder={} potentiometer={} vbus={}V currents=(u={}, v={}, w={})",
+                defmt::Debug2Format(&cx.local.firmware.state),
+                f32::from(position),
+                f32::from(last_potentiometer),
+                f32::from(filtered_bus_voltage) * esc1_discovery::VBUS_SCALE,
+                f32::from(last_currents.0),
+                f32::from(last_currents.1),
+                f32::from(last_currents.2)
+            );
         }
         #[cfg(test)]
-        let _ = physical_position_to_log;
+        let _ = (physical_position_to_log, last_currents);
     }
 
     /// The current loop: once both ADCs have converted this cycle (see
@@ -781,9 +776,9 @@ mod app {
     /// here as a scope/logic-analyzer probe, not for its usual CAN
     /// transceiver role, which this app doesn't use) high for the
     /// function's entire body, low again just before returning — a
-    /// TEMPORARY diagnostic (see `Local::diag_counter`'s doc comment)
-    /// letting real hardware show this ISR's actual entry-to-exit timing
-    /// and firing rate externally, independent of anything `defmt` logs.
+    /// TEMPORARY diagnostic letting real hardware show this ISR's actual
+    /// entry-to-exit timing and firing rate externally, independent of
+    /// anything `defmt` logs.
     ///
     /// No early return for the "adc2 not done yet" case (unlike an
     /// earlier version of this function): on the fake backend, this
@@ -807,10 +802,10 @@ mod app {
     #[task(
         binds = ADC1_2,
         priority = 1,
-        local = [adc1, adc2, pwm1, foc, quadrature, diag_counter],
+        local = [adc1, adc2, pwm1, foc, quadrature],
         shared = [
             current_loop_operation, last_potentiometer, pending_fault, last_bus_voltage,
-            filtered_bus_voltage, last_physical_position, &gpio
+            filtered_bus_voltage, last_physical_position, last_currents, &gpio
         ]
     )]
     fn adc_isr(mut cx: adc_isr::Context) {
@@ -819,16 +814,24 @@ mod app {
         use peripherals::api::pwm::PwmTrait;
         use peripherals::api::quadrature::QuadratureTrait;
 
-        cx.shared.gpio.set(esc1_discovery::CAN_SHUTDOWN_PIN, true); // DO NOT SUBMIT
+        #[cfg(target_arch = "arm")]
+        let entries = crate::ADC_ISR_ENTRIES.fetch_add(1, core::sync::atomic::Ordering::Relaxed); // DO NOT SUBMIT
 
-        // TEMPORARY diagnostic instrumentation (see `Local::diag_counter`'s
-        // doc comment) — proves whether `adc_isr` fires at all, whether
-        // each ADC reports its sequence done, and what the raw quadrature
-        // read returns from inside this interrupt, all in one place.
-        // Throttled to roughly twice a second at this ISR's expected 20kHz
-        // rate so it doesn't flood the log.
-        let diag_count = cx.local.diag_counter.tick();
-        let log_this_cycle = diag_count % 10_000 == 1;
+        #[cfg(target_arch = "arm")]
+        {
+            use core::sync::atomic::Ordering;
+            let now = cortex_m::peripheral::DWT::cycle_count();
+            let last = crate::LAST_ADC_ISR_CYCLE.swap(now, Ordering::Relaxed);
+            // Skip the very first entry: `last` is still its `0` initial
+            // value then, so `now - last` would be time-since-boot, not a
+            // real inter-ISR interval, and would permanently poison the max.
+            if entries > 0 {
+                let interval = now.wrapping_sub(last);
+                crate::MAX_ADC_ISR_INTERVAL_CYCLES.fetch_max(interval, Ordering::Relaxed);
+            }
+        } // DO NOT SUBMIT
+
+        cx.shared.gpio.set(esc1_discovery::CAN_SHUTDOWN_PIN, true); // DO NOT SUBMIT
 
         let adc1_done = cx.local.adc1.try_retrieve_result();
         if !adc1_done {
@@ -837,16 +840,6 @@ mod app {
                 .lock(|fault| *fault = (*fault).max(Fault::AdcConversionIncomplete));
         }
         let adc2_done = cx.local.adc2.try_retrieve_result();
-
-        #[cfg(not(test))]
-        if log_this_cycle {
-            defmt::info!(
-                "adc_isr diag #{}: adc1_done={} adc2_done={}",
-                diag_count,
-                adc1_done,
-                adc2_done
-            );
-        }
 
         if adc2_done {
             let u = cx.local.adc1.get_sample(0); // OPAMP1
@@ -857,6 +850,7 @@ mod app {
 
             cx.shared.last_potentiometer.lock(|p| *p = potentiometer);
             cx.shared.last_bus_voltage.lock(|v| *v = vbus);
+            cx.shared.last_currents.lock(|c| *c = (u, v, w));
             // The *filtered* bus voltage (see `Firmware::step`) is what
             // actually gets applied here -- filtering happens once per
             // main-loop iteration, not every current-loop cycle.
@@ -867,16 +861,6 @@ mod app {
             cx.shared
                 .last_physical_position
                 .lock(|p| *p = physical_angle);
-
-            #[cfg(not(test))]
-            if log_this_cycle {
-                defmt::info!(
-                    "adc_isr diag #{}: raw physical_angle={} potentiometer={}",
-                    diag_count,
-                    f32::from(physical_angle),
-                    f32::from(potentiometer)
-                );
-            }
 
             let operation = cx.shared.current_loop_operation.lock(|o| *o);
             // Command 0% duty cycle if the FOC step() function returns None.
@@ -895,12 +879,6 @@ mod app {
             cx.local.pwm1.set_duty_cycle(1, duty_cycles.1);
             cx.local.pwm1.set_duty_cycle(2, duty_cycles.2);
         }
-
-        // `log_this_cycle` only drives `#[cfg(not(test))]` diagnostic
-        // prints above — see `physical_position_to_log`'s own
-        // `#[cfg(test)]` companion in `idle` for why this needs one too.
-        #[cfg(test)]
-        let _ = log_this_cycle;
 
         cx.shared.gpio.set(esc1_discovery::CAN_SHUTDOWN_PIN, false); // DO NOT SUBMIT
     }
@@ -951,35 +929,31 @@ mod tests {
     }
 
     /// Calls [`step_idle`] repeatedly until `predicate` (given a fresh
-    /// look at `Local`/`Shared` after each step) returns `true`. Real
-    /// time only advances a couple of simulated MCU-frequency ticks per
-    /// call (see `peripherals::fake::clock`), so crossing even
-    /// `BIAS_AVERAGE_WINDOW`'s or `DEBOUNCE_DURATION`'s few milliseconds
-    /// takes many calls — capped well above what either should ever
+    /// look at `Local`/`Shared` after each step) returns `true`. Simulated
+    /// time only advances two ticks per call, deterministically (one from
+    /// `Firmware::step`'s own `advance_reference_point()`, one from its
+    /// `ClockTrait::now()` read — see `peripherals::fake::clock`, which
+    /// isn't wall-clock-driven at all), so crossing this module's own
+    /// timing windows takes many calls — worst case,
+    /// `advance_to_operation_enabled` needing to cross `DEBOUNCE_DURATION`
+    /// (20ms) then `PHASE_LOCK_SETTLE_WINDOW` (500ms) in one
+    /// `advance_idle_until` call, ~88.4M ticks at this app's 170MHz
+    /// `MCU_FREQUENCY`, ~44.2M calls. The cap below is comfortably above
+    /// that -- well above what any of this module's windows should ever
     /// need, so a regression that breaks a transition fails fast instead
-    /// of hanging.
+    /// of hanging, but revisit it if `PHASE_LOCK_SETTLE_WINDOW`/
+    /// `DEBOUNCE_DURATION` grow further.
     fn advance_idle_until(
         harness: &app::Harness,
         mut predicate: impl FnMut(&app::Local, &app::Shared) -> bool,
     ) {
-        for _ in 0..10_000_000 {
+        for _ in 0..100_000_000 {
             step_idle(harness);
             if with_local_and_shared(harness, |local, shared| predicate(local, shared)) {
                 return;
             }
         }
         panic!("predicate was never satisfied within the iteration cap");
-    }
-
-    /// Advances `harness` far enough to comfortably cross any of this
-    /// module's own timing windows (`BIAS_AVERAGE_WINDOW`,
-    /// `DEBOUNCE_DURATION`, `PHASE_LOCK_SETTLE_WINDOW`) — for a test that
-    /// just needs simulated time to pass, not a specific state change to
-    /// wait for.
-    fn advance_idle_generously(harness: &app::Harness) {
-        for _ in 0..2_000_000 {
-            step_idle(harness);
-        }
     }
 
     /// Presses the button, advances until `predicate` is satisfied, then
@@ -1000,11 +974,14 @@ mod tests {
     }
 
     /// Advances `harness` from wherever it is, through
-    /// `SwitchOnDisabled` -> `SwitchedOn` (one button press) ->
-    /// `OperationEnabled` (a second press, once
-    /// `PHASE_LOCK_SETTLE_WINDOW` has had time to elapse) — the common
-    /// setup several tests below need before they can exercise
-    /// `OperationEnabled`'s or `QuickStopActive`'s own behavior.
+    /// `SwitchOnDisabled` -> `SwitchedOn` -> `OperationEnabled` on a
+    /// single button press: a confirmed press sets
+    /// `Firmware::enable_target` to `Some(true)`, which is enough for
+    /// `Firmware::step` to cascade both hops on its own once
+    /// `PHASE_LOCK_SETTLE_WINDOW` has had time to elapse, with no second
+    /// press needed — the common setup several tests below need before
+    /// they can exercise `OperationEnabled`'s or `QuickStopActive`'s own
+    /// behavior.
     fn advance_to_operation_enabled(
         harness: &app::Harness,
         fakes: &esc1_discovery::BoardFakePeripherals,
@@ -1012,10 +989,6 @@ mod tests {
         advance_idle_until(harness, |local, _shared| {
             local.firmware.state == ds402::State::SwitchOnDisabled
         });
-        press_button_until(harness, fakes, |local, _shared| {
-            local.firmware.state == ds402::State::SwitchedOn
-        });
-        advance_idle_generously(harness);
         press_button_until(harness, fakes, |local, _shared| {
             local.firmware.state == ds402::State::OperationEnabled
         });
@@ -1041,35 +1014,6 @@ mod tests {
                 state
             };
             assert_eq!(complete_initialization(state), expected, "{state:?}");
-        }
-    }
-
-    #[test]
-    fn confirmed_button_press_cascades_switch_on_disabled_to_switched_on() {
-        assert_eq!(
-            on_confirmed_button_press(ds402::State::SwitchOnDisabled),
-            ds402::State::SwitchedOn
-        );
-    }
-
-    #[test]
-    fn confirmed_button_press_from_operation_enabled_enters_quick_stop_active() {
-        assert_eq!(
-            on_confirmed_button_press(ds402::State::OperationEnabled),
-            ds402::State::QuickStopActive
-        );
-    }
-
-    #[test]
-    fn confirmed_button_press_is_a_no_op_from_every_other_state() {
-        for state in ALL_DS402_STATES {
-            if matches!(
-                state,
-                ds402::State::SwitchOnDisabled | ds402::State::OperationEnabled
-            ) {
-                continue;
-            }
-            assert_eq!(on_confirmed_button_press(state), state, "{state:?}");
         }
     }
 
@@ -1351,9 +1295,12 @@ mod tests {
         fakes.gpio.set(esc1_discovery::BUTTON_PIN, false);
         advance_idle_until(&harness, |local, _shared| !local.firmware.button_was_active);
 
-        // Once settled, a fresh press enables operation.
-        advance_idle_generously(&harness);
-        press_button_until(&harness, &fakes, |local, _shared| {
+        // Once settled, `SwitchedOn` advances on its own -- no further
+        // press needed. `enable_target` is still `Some(true)` from the
+        // press that got here (the brief press above was never
+        // confirmed, so it didn't flip), so `OperationEnabled`'s own arm
+        // won't immediately kick it back down once it arrives there.
+        advance_idle_until(&harness, |local, _shared| {
             local.firmware.state == ds402::State::OperationEnabled
         });
     }
