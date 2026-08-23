@@ -31,5 +31,19 @@ cortex-m = "0.7.7"
 # src/main.rs) dispatches through, and the `#[panic_handler]` — see
 # stm32g4.rs. Neither is referenced by name anywhere, so linking them in
 # at all requires this crate (which really is used) to import them.
-defmt-rtt = "1.3.0"
+#
+# `disable-blocking-mode`: without it, `probe-rs` puts the RTT channel
+# into blocking mode, and defmt-rtt holds a *global* critical section
+# (`critical-section-single-core` masks every interrupt, unlike RTIC's own
+# priority-ceiling locks) for the entire span of writing a log frame to
+# the RTT buffer -- including any spin-wait for the host to drain it when
+# full. On this app that meant `adc_isr` (the only bound interrupt, at
+# RTIC priority 1) could be stalled by however long the host took to
+# drain the buffer, with no upper bound -- observed on hardware as the
+# ~20kHz current loop occasionally running ~118us after the previous
+# entry instead of the expected ~50us, while a debug host had RTT
+# attached and logging was active. This feature makes the RTT write
+# lossy instead of blocking, so logging can never again stall real-time
+# code -- see defmt-rtt's own "Blocking/Non-blocking" module doc comment.
+defmt-rtt = { version = "1.3.0", features = ["disable-blocking-mode"] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }

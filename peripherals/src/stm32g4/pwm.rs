@@ -17,11 +17,12 @@
 //! at all (RM0440), so using it here never contends with
 //! [`PwmTrait::set_duty_cycle`]'s channels. It's configured for PWM mode 2
 //! (the inverse of the PWM mode 1 channels 1-3 use) with its compare value
-//! pinned at `ARR`: in upcounting that stays inactive until `CNT` reaches
-//! `ARR`, and in downcounting `CNT` immediately falls back below `ARR` on
-//! the very next tick — so channel 5's internal reference signal (OC5REF)
-//! is a pulse exactly one counter tick wide, centered on the instant the
-//! counter turns around. `TRGO2` (`CR2.MMS2`) is then routed to mirror it.
+//! pinned [`MID_POINT_TRIGGER_HALF_WIDTH_TICKS`] short of `ARR`, not at
+//! `ARR` itself: channel 5's internal reference signal (OC5REF) is then
+//! active for `2 * MID_POINT_TRIGGER_HALF_WIDTH_TICKS + 1` counter ticks
+//! symmetric around the counter's turnaround (`CNT == ARR`), not for a
+//! single tick — see that constant's own doc comment for why a wider pulse
+//! is needed. `TRGO2` (`CR2.MMS2`) is then routed to mirror it.
 //!
 //! # Which timers this driver actually supports: `TIM1`/`TIM8` are
 //! unconditionally available registers on every chip feature this crate
@@ -33,6 +34,27 @@ use common::unit_interval::UnitInterval;
 use stm32_metapac::timer::{vals, TimAdv};
 
 use crate::api::pwm::{PwmOptions, PwmTimer, PwmTrait};
+
+/// How many counter ticks short of `ARR` [`PwmTrait::open`] pins the
+/// mid-point trigger's `CCR5` at, on each side of the counter's turnaround
+/// -- see this module's "the mid-point trigger" doc comment.
+///
+/// A single-tick-wide OC5REF/TRGO2 pulse (`CCR5 == ARR` exactly) measured
+/// correct on every TIM1 register this driver touches (`CC5E`, `CR2.MMS2`,
+/// `CCMR3.OC5M`, `ARR`/`CCR5`) but never actually started a conversion on
+/// real B-G431B-ESC1 hardware, while plain TRGO (the update event, which
+/// holds a recognizable state rather than a single-tick pulse) triggered
+/// immediately -- consistent with the pulse being too narrow for the ADC's
+/// own clock domain (`SYNC_DIV4`, a quarter of this timer's clock) to
+/// reliably catch: RM0440 documents no minimum OC5REF pulse width for
+/// TRGO2 detection, but a source-domain pulse shorter than one destination
+/// clock period is a textbook clock-domain-crossing hazard. 8 ticks (a
+/// `2*8+1 = 17`-tick, ~100ns pulse at 170MHz) was confirmed on hardware to
+/// fire reliably; at the 20kHz-class PWM frequencies this driver targets
+/// (`ARR` in the low thousands), shifting the trigger 8 ticks (order of
+/// 10s of ns) before the true peak is negligible against the ADC's own
+/// sample-and-conversion time.
+const MID_POINT_TRIGGER_HALF_WIDTH_TICKS: u16 = 8;
 
 /// Register-level [`PwmTrait`] driver for a real STM32G4 chip's
 /// advanced-control timer, backed by `stm32-metapac`.
@@ -164,9 +186,13 @@ impl PwmTrait for Pwm {
 
         if options.mid_point_trigger() {
             // See this module's doc comment's "the mid-point trigger"
-            // section.
+            // section, and `MID_POINT_TRIGGER_HALF_WIDTH_TICKS`'s own doc
+            // comment for why `CCR5` is pinned short of `ARR` rather than
+            // at it.
             block.ccmr3().write(|w| w.set_ocm(0, vals::Ocm::PWM_MODE2));
-            block.ccr5().write(|w| w.set_ccr(arr));
+            block
+                .ccr5()
+                .write(|w| w.set_ccr(arr.saturating_sub(MID_POINT_TRIGGER_HALF_WIDTH_TICKS)));
         }
 
         // BDTR: dead time, plus the main output enable every physical
