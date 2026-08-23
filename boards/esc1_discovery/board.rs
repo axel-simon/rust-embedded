@@ -80,6 +80,28 @@ pub const VBUS_PIN: GpioPin = GpioPin::analog(GpioPort::PA, 0);
 pub const POTENTIOMETER_PIN: GpioPin = GpioPin::analog(GpioPort::PB, 12);
 pub const TEMP_FEEDBACK_PIN: GpioPin = GpioPin::analog(GpioPort::PB, 14);
 
+/// This board's ADC reference voltage (`VREF+`, tied to `VDDA`) — full
+/// scale on any ADC channel (a [`common::unit_interval::UnitInterval`] of
+/// just under `1.0`) corresponds to this many volts at the pin.
+const ADC_REFERENCE_VOLTAGE: f32 = 3.3;
+
+/// [`VBUS_PIN`]'s own sense divider: a plain resistive divider from VBUS
+/// down to GND, this many ohms on the high (VBUS) side, with the ADC
+/// reading the voltage across [`VBUS_DIVIDER_LOW_OHMS`] on the low side.
+const VBUS_DIVIDER_HIGH_OHMS: f32 = 169_000.0;
+/// See [`VBUS_DIVIDER_HIGH_OHMS`] — the low (GND) side of the same
+/// divider, whose own voltage is what the ADC actually reads.
+const VBUS_DIVIDER_LOW_OHMS: f32 = 18_000.0;
+
+/// Scales a [`VBUS_PIN`] reading up from a
+/// [`common::unit_interval::UnitInterval`] fraction of
+/// [`ADC_REFERENCE_VOLTAGE`] into the actual bus voltage in volts:
+/// `f32::from(reading) * VBUS_SCALE`. Undoes
+/// [`VBUS_DIVIDER_HIGH_OHMS`]/[`VBUS_DIVIDER_LOW_OHMS`]'s divider on top of
+/// the plain ADC-fraction-to-volts conversion every channel needs.
+pub const VBUS_SCALE: f32 =
+    ADC_REFERENCE_VOLTAGE * (VBUS_DIVIDER_HIGH_OHMS + VBUS_DIVIDER_LOW_OHMS) / VBUS_DIVIDER_LOW_OHMS;
+
 // User interface: status LED and button, both on the daughterboard.
 pub const STATUS_PIN: GpioPin = GpioPin::output(GpioPort::PC, 6);
 pub const BUTTON_PIN: GpioPin = GpioPin::inverted_input(GpioPort::PC, 10).with_pull_up();
